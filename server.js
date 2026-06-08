@@ -17,7 +17,18 @@ app.use(express.json());
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/masters', require('./routes/masterRoutes'));
+app.use('/api/masters', require('./routes/dashboardRoutes'));
+app.use('/api/masters', require('./routes/countryRoutes'));
+app.use('/api/masters', require('./routes/stateRoutes'));
+app.use('/api/masters', require('./routes/districtRoutes'));
+app.use('/api/masters', require('./routes/cityRoutes'));
+app.use('/api/masters', require('./routes/industryRoutes'));
+app.use('/api/masters', require('./routes/jobCategoryRoutes'));
+app.use('/api/masters', require('./routes/jobTypeRoutes'));
+app.use('/api/masters', require('./routes/featureRoutes'));
+app.use('/api/masters', require('./routes/planRoutes'));
+app.use('/api/masters', require('./routes/qualificationRoutes'));
+app.use('/api/masters', require('./routes/planMappingRoutes'));
 app.use('/api/employers', require('./routes/employerRoutes'));
 app.use('/api/jobseekers', require('./routes/jobseekerRoutes'));
 app.use('/api/jobs', require('./routes/jobRoutes'));
@@ -38,3 +49,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
 });
+
+module.exports = app;

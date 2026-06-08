@@ -27,6 +27,15 @@ const PlanSchema = new mongoose.Schema({
   endDate: {
     type: Date
   },
+  planType: {
+    type: String,
+    enum: ['Free', 'Paid'],
+    default: 'Free'
+  },
+  displayOrder: {
+    type: Number,
+    default: 0
+  },
   features: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Feature'
