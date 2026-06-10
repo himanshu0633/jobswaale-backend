@@ -3,7 +3,7 @@ const User = require('../models/User');
 
 exports.getJobseekers = async (req, res) => {
   try {
-    const list = await Jobseeker.find()
+    const list = await Jobseeker.find({ isDeleted: { $ne: true } })
       .populate('userId', 'email role status')
       .populate('qualification')
       .populate('industryType')
@@ -177,8 +177,8 @@ exports.deleteJobseeker = async (req, res) => {
       return res.status(404).json({ message: 'Jobseeker profile not found' });
     }
 
-    await User.findByIdAndDelete(jobseeker.userId);
-    await Jobseeker.findByIdAndDelete(id);
+    await User.findByIdAndUpdate(jobseeker.userId, { isDeleted: true, updatedLogin: req.user ? req.user._id : null, ip: req.clientIp || '127.0.0.1' });
+    await Jobseeker.findByIdAndUpdate(id, { isDeleted: true, updatedLogin: req.user ? req.user._id : null, ip: req.clientIp || '127.0.0.1' });
 
     res.json({ message: 'Jobseeker profile deleted successfully' });
   } catch (error) {

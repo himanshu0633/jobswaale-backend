@@ -28,6 +28,15 @@ const PlanMappingSchema = new mongoose.Schema({
   updatedLogin: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  status: {
+    type: String,
+    enum: ['active', 'inactive'],
+    default: 'active'
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }

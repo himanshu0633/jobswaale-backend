@@ -22,9 +22,25 @@ const UserSchema = new mongoose.Schema({
     type: String,
     enum: ['active', 'inactive'],
     default: 'active'
+  },
+  ip: {
+    type: String,
+    default: ''
+  },
+  login: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  updatedLogin: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
   }
 }, {
-  timestamps: true
+  timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
 });
 
 // Hash password before saving

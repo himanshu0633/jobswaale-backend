@@ -3,7 +3,7 @@ const User = require('../models/User');
 
 exports.getEmployers = async (req, res) => {
   try {
-    const list = await Employer.find()
+    const list = await Employer.find({ isDeleted: { $ne: true } })
       .populate('userId', 'email role status')
       .populate('industryType')
       .populate('currentPlan')
@@ -158,8 +158,8 @@ exports.deleteEmployer = async (req, res) => {
       return res.status(404).json({ message: 'Employer profile not found' });
     }
 
-    await User.findByIdAndDelete(employer.userId);
-    await Employer.findByIdAndDelete(id);
+    await User.findByIdAndUpdate(employer.userId, { isDeleted: true, updatedLogin: req.user ? req.user._id : null, ip: req.clientIp || '127.0.0.1' });
+    await Employer.findByIdAndUpdate(id, { isDeleted: true, updatedLogin: req.user ? req.user._id : null, ip: req.clientIp || '127.0.0.1' });
 
     res.json({ message: 'Employer profile deleted successfully' });
   } catch (error) {

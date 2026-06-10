@@ -5,7 +5,7 @@ exports.getCities = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
     if (req.query.did) filter.did = req.query.did;
     if (req.query.sid) filter.sid = req.query.sid;
     if (req.query.cid) filter.cid = req.query.cid;
@@ -88,7 +88,7 @@ exports.updateCity = async (req, res) => {
 exports.deleteCity = async (req, res) => {
   try {
     const { id } = req.params;
-    await City.findByIdAndDelete(id);
+    await City.findByIdAndUpdate(id, addAuditOnUpdate(req, { isDeleted: true }));
     res.json({ message: 'City deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });

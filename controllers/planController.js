@@ -5,7 +5,7 @@ exports.getPlans = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
     if (paginate === 'true' || page !== undefined) {
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 10;
@@ -106,7 +106,7 @@ exports.updatePlan = async (req, res) => {
 exports.deletePlan = async (req, res) => {
   try {
     const { uid } = req.params;
-    await Plan.findByIdAndDelete(uid);
+    await Plan.findByIdAndUpdate(uid, addAuditOnUpdate(req, { isDeleted: true }));
     res.json({ message: 'Plan deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });

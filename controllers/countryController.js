@@ -5,7 +5,7 @@ exports.getCountries = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
     if (paginate === 'true' || page !== undefined) {
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 10;
@@ -94,7 +94,7 @@ exports.deleteCountry = async (req, res) => {
       return res.status(404).json({ message: 'Country not found' });
     }
     
-    await Country.findByIdAndDelete(id);
+    await Country.findByIdAndUpdate(id, addAuditOnUpdate(req, { isDeleted: true }));
     res.json({ message: 'Country deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });

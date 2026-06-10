@@ -5,7 +5,7 @@ exports.getStates = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
     if (req.query.cid) {
       filter.cid = req.query.cid;
     }
@@ -93,7 +93,7 @@ exports.updateState = async (req, res) => {
 exports.deleteState = async (req, res) => {
   try {
     const { id } = req.params;
-    await State.findByIdAndDelete(id);
+    await State.findByIdAndUpdate(id, addAuditOnUpdate(req, { isDeleted: true }));
     res.json({ message: 'State deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });

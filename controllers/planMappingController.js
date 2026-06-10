@@ -3,7 +3,7 @@ const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
 
 exports.getPlanMappings = async (req, res) => {
   try {
-    const list = await PlanMapping.find().populate('plan').populate('feature');
+    const list = await PlanMapping.find({ isDeleted: { $ne: true } }).populate('plan').populate('feature');
     res.json(list);
   } catch (error) {
     res.status(500).json({ message: error.message });

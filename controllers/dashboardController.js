@@ -4,13 +4,13 @@ const Job = require('../models/Job');
 
 exports.getDashboardStats = async (req, res) => {
   try {
-    const employersCount = await Employer.countDocuments();
-    const jobseekersCount = await Jobseeker.countDocuments();
-    const jobsCount = await Job.countDocuments();
+    const employersCount = await Employer.countDocuments({ isDeleted: { $ne: true } });
+    const jobseekersCount = await Jobseeker.countDocuments({ isDeleted: { $ne: true } });
+    const jobsCount = await Job.countDocuments({ isDeleted: { $ne: true } });
     
     // Sum cost of currentPlan for all Employers and Jobseekers to compute actual revenue
-    const employersList = await Employer.find().populate('currentPlan');
-    const jobseekersList = await Jobseeker.find().populate('currentPlan');
+    const employersList = await Employer.find({ isDeleted: { $ne: true } }).populate('currentPlan');
+    const jobseekersList = await Jobseeker.find({ isDeleted: { $ne: true } }).populate('currentPlan');
     
     let totalRevenue = 0;
     employersList.forEach(emp => {

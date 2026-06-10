@@ -5,7 +5,7 @@ exports.getDistricts = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = {};
+    const filter = { isDeleted: { $ne: true } };
     if (req.query.sid) {
       filter.sid = req.query.sid;
     }
@@ -93,7 +93,7 @@ exports.updateDistrict = async (req, res) => {
 exports.deleteDistrict = async (req, res) => {
   try {
     const { id } = req.params;
-    await District.findByIdAndDelete(id);
+    await District.findByIdAndUpdate(id, addAuditOnUpdate(req, { isDeleted: true }));
     res.json({ message: 'District deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });

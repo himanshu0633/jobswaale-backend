@@ -40,6 +40,10 @@ const CitySchema = new mongoose.Schema({
   updatedLogin: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  isDeleted: {
+    type: Boolean,
+    default: false
   }
 }, {
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }

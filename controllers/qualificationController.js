@@ -10,7 +10,7 @@ exports.getQualifications = async (req, res) => {
       const limitNum = parseInt(limit) || 10;
       const skip = (pageNum - 1) * limitNum;
 
-      const filter = {};
+      const filter = { isDeleted: { $ne: true } };
       if (search) {
         const cleanedSearch = search.replace(/^0+/, '');
         const filterOr = [
@@ -39,7 +39,7 @@ exports.getQualifications = async (req, res) => {
         totalPages: Math.ceil(total / limitNum) || 1
       });
     } else {
-      const list = await Qualification.find()
+      const list = await Qualification.find({ isDeleted: { $ne: true } })
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
         .sort({ sortingNo: 1, id: 1 });
@@ -103,7 +103,7 @@ exports.updateQualification = async (req, res) => {
 exports.deleteQualification = async (req, res) => {
   try {
     const { uid } = req.params;
-    await Qualification.findByIdAndDelete(uid);
+    await Qualification.findByIdAndUpdate(uid, addAuditOnUpdate(req, { isDeleted: true }));
     res.json({ message: 'Qualification deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });

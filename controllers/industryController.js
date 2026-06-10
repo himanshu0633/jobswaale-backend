@@ -11,7 +11,7 @@ exports.getIndustryTypes = async (req, res) => {
       const skip = (pageNum - 1) * limitNum;
 
       // Build search filter on ID and Name
-      const filter = {};
+      const filter = { isDeleted: { $ne: true } };
       if (search) {
         const cleanedSearch = search.replace(/^0+/, '');
         const filterOr = [
@@ -40,7 +40,7 @@ exports.getIndustryTypes = async (req, res) => {
         totalPages: Math.ceil(total / limitNum) || 1
       });
     } else {
-      const list = await IndustryType.find()
+      const list = await IndustryType.find({ isDeleted: { $ne: true } })
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
         .sort({ sortingNo: 1, id: 1 });
@@ -104,7 +104,7 @@ exports.updateIndustryType = async (req, res) => {
 exports.deleteIndustryType = async (req, res) => {
   try {
     const { uid } = req.params;
-    await IndustryType.findByIdAndDelete(uid);
+    await IndustryType.findByIdAndUpdate(uid, addAuditOnUpdate(req, { isDeleted: true }));
     res.json({ message: 'Industry type deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
