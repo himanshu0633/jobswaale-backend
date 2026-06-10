@@ -1,5 +1,6 @@
 const Feature = require('../models/Feature');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { activeFilter, validateWholeNumber } = require('../utils/masterHelpers');
 
 exports.getFeatures = async (req, res) => {
   try {
@@ -10,7 +11,7 @@ exports.getFeatures = async (req, res) => {
       const limitNum = parseInt(limit) || 10;
       const skip = (pageNum - 1) * limitNum;
 
-      const filter = { isDeleted: { $ne: true } };
+      const filter = activeFilter(req);
       if (search) {
         const cleanedSearch = search.replace(/^0+/, '');
         const filterOr = [
@@ -39,10 +40,10 @@ exports.getFeatures = async (req, res) => {
         totalPages: Math.ceil(total / limitNum) || 1
       });
     } else {
-      const list = await Feature.find({ isDeleted: { $ne: true } })
+      const list = await Feature.find(activeFilter(req))
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ displayOrder: 1, id: 1 });
+        .sort({ featureName: 1, id: 1 });
       res.json(list);
     }
   } catch (error) {
@@ -61,6 +62,9 @@ exports.createFeature = async (req, res) => {
     if (exists) {
       return res.status(400).json({ message: 'Record with this ID already exists' });
     }
+
+    const sortError = validateWholeNumber(displayOrder, 'Display order');
+    if (sortError) return res.status(400).json({ message: sortError });
 
     if (displayOrder !== undefined && displayOrder !== null && displayOrder !== '') {
       const sortExists = await Feature.findOne({ displayOrder: Number(displayOrder) });
@@ -81,6 +85,9 @@ exports.updateFeature = async (req, res) => {
   try {
     const { uid } = req.params;
     const { featureName, displayOrder, status } = req.body;
+
+    const sortError = validateWholeNumber(displayOrder, 'Display order');
+    if (sortError) return res.status(400).json({ message: sortError });
 
     if (displayOrder !== undefined && displayOrder !== null && displayOrder !== '') {
       const sortExists = await Feature.findOne({ displayOrder: Number(displayOrder), _id: { $ne: uid } });

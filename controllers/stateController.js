@@ -1,11 +1,12 @@
 const State = require('../models/State');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { activeFilter, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getStates = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = { isDeleted: { $ne: true } };
+    const filter = activeFilter(req);
     if (req.query.cid) {
       filter.cid = req.query.cid;
     }
@@ -41,7 +42,7 @@ exports.getStates = async (req, res) => {
       const list = await State.find(filter)
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ sid: 1 });
+        .sort({ stateName: 1, sid: 1 });
       res.json(list);
     }
   } catch (error) {
@@ -55,13 +56,19 @@ exports.createState = async (req, res) => {
     if (!cid || !sid || !stateName) {
       return res.status(400).json({ message: 'cid, sid, and stateName are required' });
     }
+    const cleanStateName = stateName.trim();
 
-    const exists = await State.findOne({ sid });
+    const exists = await State.findOne({
+      $or: [
+        { sid },
+        caseInsensitiveExactFilter('stateName', cleanStateName, { cid })
+      ]
+    });
     if (exists) {
-      return res.status(400).json({ message: 'State with this SID already exists' });
+      return res.status(400).json({ message: 'State with this SID or Name already exists' });
     }
 
-    const newState = new State(addAuditOnCreate(req, { cid, sid, stateName, status }));
+    const newState = new State(addAuditOnCreate(req, { cid, sid, stateName: cleanStateName, status }));
     await newState.save();
     res.status(201).json(newState);
   } catch (error) {
@@ -78,10 +85,20 @@ exports.updateState = async (req, res) => {
     if (!state) {
       return res.status(404).json({ message: 'State not found' });
     }
+    const cleanStateName = stateName ? stateName.trim() : stateName;
+    if (cleanStateName) {
+      const duplicate = await State.findOne(caseInsensitiveExactFilter('stateName', cleanStateName, {
+        cid,
+        _id: { $ne: id }
+      }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'State with this Name already exists' });
+      }
+    }
 
     const updated = await State.findByIdAndUpdate(
       id,
-      addAuditOnUpdate(req, { cid, stateName, status }),
+      addAuditOnUpdate(req, { cid, stateName: cleanStateName, status }),
       { new: true }
     );
     res.json(updated);

@@ -1,11 +1,12 @@
 const District = require('../models/District');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { activeFilter } = require('../utils/masterHelpers');
 
 exports.getDistricts = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = { isDeleted: { $ne: true } };
+    const filter = activeFilter(req);
     if (req.query.sid) {
       filter.sid = req.query.sid;
     }
@@ -41,7 +42,7 @@ exports.getDistricts = async (req, res) => {
       const list = await District.find(filter)
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ did: 1 });
+        .sort({ districtName: 1, did: 1 });
       res.json(list);
     }
   } catch (error) {

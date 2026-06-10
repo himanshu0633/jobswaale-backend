@@ -1,5 +1,6 @@
 const Qualification = require('../models/Qualification');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { activeFilter, validateWholeNumber } = require('../utils/masterHelpers');
 
 exports.getQualifications = async (req, res) => {
   try {
@@ -10,7 +11,7 @@ exports.getQualifications = async (req, res) => {
       const limitNum = parseInt(limit) || 10;
       const skip = (pageNum - 1) * limitNum;
 
-      const filter = { isDeleted: { $ne: true } };
+      const filter = activeFilter(req);
       if (search) {
         const cleanedSearch = search.replace(/^0+/, '');
         const filterOr = [
@@ -39,10 +40,10 @@ exports.getQualifications = async (req, res) => {
         totalPages: Math.ceil(total / limitNum) || 1
       });
     } else {
-      const list = await Qualification.find({ isDeleted: { $ne: true } })
+      const list = await Qualification.find(activeFilter(req))
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ sortingNo: 1, id: 1 });
+        .sort({ name: 1, id: 1 });
       res.json(list);
     }
   } catch (error) {
@@ -61,6 +62,9 @@ exports.createQualification = async (req, res) => {
     if (exists) {
       return res.status(400).json({ message: 'Record with this ID already exists' });
     }
+
+    const sortError = validateWholeNumber(sortingNo);
+    if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
       const sortExists = await Qualification.findOne({ sortingNo: Number(sortingNo) });
@@ -81,6 +85,9 @@ exports.updateQualification = async (req, res) => {
   try {
     const { uid } = req.params;
     const { name, sortingNo, status } = req.body;
+
+    const sortError = validateWholeNumber(sortingNo);
+    if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
       const sortExists = await Qualification.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid } });

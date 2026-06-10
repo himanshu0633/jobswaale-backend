@@ -1,5 +1,6 @@
 const IndustryType = require('../models/IndustryType');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { activeFilter, validateWholeNumber } = require('../utils/masterHelpers');
 
 exports.getIndustryTypes = async (req, res) => {
   try {
@@ -11,7 +12,7 @@ exports.getIndustryTypes = async (req, res) => {
       const skip = (pageNum - 1) * limitNum;
 
       // Build search filter on ID and Name
-      const filter = { isDeleted: { $ne: true } };
+      const filter = activeFilter(req);
       if (search) {
         const cleanedSearch = search.replace(/^0+/, '');
         const filterOr = [
@@ -40,10 +41,10 @@ exports.getIndustryTypes = async (req, res) => {
         totalPages: Math.ceil(total / limitNum) || 1
       });
     } else {
-      const list = await IndustryType.find({ isDeleted: { $ne: true } })
+      const list = await IndustryType.find(activeFilter(req))
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ sortingNo: 1, id: 1 });
+        .sort({ industryType: 1, id: 1 });
       res.json(list);
     }
   } catch (error) {
@@ -62,6 +63,9 @@ exports.createIndustryType = async (req, res) => {
     if (exists) {
       return res.status(400).json({ message: 'Record with this ID already exists' });
     }
+
+    const sortError = validateWholeNumber(sortingNo);
+    if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
       const sortExists = await IndustryType.findOne({ sortingNo: Number(sortingNo) });
@@ -82,6 +86,9 @@ exports.updateIndustryType = async (req, res) => {
   try {
     const { uid } = req.params;
     const { industryType, sortingNo, status } = req.body;
+
+    const sortError = validateWholeNumber(sortingNo);
+    if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
       const sortExists = await IndustryType.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid } });

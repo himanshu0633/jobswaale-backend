@@ -1,11 +1,12 @@
 const City = require('../models/City');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { activeFilter, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getCities = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = { isDeleted: { $ne: true } };
+    const filter = activeFilter(req);
     if (req.query.did) filter.did = req.query.did;
     if (req.query.sid) filter.sid = req.query.sid;
     if (req.query.cid) filter.cid = req.query.cid;
@@ -41,7 +42,7 @@ exports.getCities = async (req, res) => {
       const list = await City.find(filter)
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ ctid: 1 });
+        .sort({ cityName: 1, ctid: 1 });
       res.json(list);
     }
   } catch (error) {
@@ -55,13 +56,19 @@ exports.createCity = async (req, res) => {
     if (!cid || !sid || !did || !ctid || !cityName) {
       return res.status(400).json({ message: 'cid, sid, did, ctid, and cityName are required' });
     }
+    const cleanCityName = cityName.trim();
 
-    const exists = await City.findOne({ ctid });
+    const exists = await City.findOne({
+      $or: [
+        { ctid },
+        caseInsensitiveExactFilter('cityName', cleanCityName, { cid, sid, did })
+      ]
+    });
     if (exists) {
-      return res.status(400).json({ message: 'City with this CTID already exists' });
+      return res.status(400).json({ message: 'City with this CTID or Name already exists' });
     }
 
-    const item = new City(addAuditOnCreate(req, { cid, sid, did, ctid, cityName, status }));
+    const item = new City(addAuditOnCreate(req, { cid, sid, did, ctid, cityName: cleanCityName, status }));
     await item.save();
     res.status(201).json(item);
   } catch (error) {
@@ -73,10 +80,22 @@ exports.updateCity = async (req, res) => {
   try {
     const { id } = req.params;
     const { cid, sid, did, cityName, status } = req.body;
+    const cleanCityName = cityName ? cityName.trim() : cityName;
+    if (cleanCityName) {
+      const duplicate = await City.findOne(caseInsensitiveExactFilter('cityName', cleanCityName, {
+        cid,
+        sid,
+        did,
+        _id: { $ne: id }
+      }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'City with this Name already exists' });
+      }
+    }
 
     const updated = await City.findByIdAndUpdate(
       id,
-      addAuditOnUpdate(req, { cid, sid, did, cityName, status }),
+      addAuditOnUpdate(req, { cid, sid, did, cityName: cleanCityName, status }),
       { new: true }
     );
     res.json(updated);

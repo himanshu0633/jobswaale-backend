@@ -1,5 +1,6 @@
 const Plan = require('../models/Plan');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { validateWholeNumber } = require('../utils/masterHelpers');
 
 exports.getPlans = async (req, res) => {
   try {
@@ -39,7 +40,7 @@ exports.getPlans = async (req, res) => {
         .populate('features')
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ displayOrder: 1, cost: 1 });
+        .sort({ planName: 1, cost: 1 });
       res.json(list);
     }
   } catch (error) {
@@ -50,16 +51,22 @@ exports.getPlans = async (req, res) => {
 exports.createPlan = async (req, res) => {
   try {
     const { category, planName, cost, planValidity, planType, displayOrder, startingDate, endDate, features, status } = req.body;
-    if (!category || !planName || cost === undefined || !planValidity) {
-      return res.status(400).json({ message: 'category, planName, cost, and planValidity are required' });
+    const normalizedPlanType = planType || 'Free';
+    if (!planName || !planValidity) {
+      return res.status(400).json({ message: 'planName and planValidity are required' });
     }
+    if (normalizedPlanType === 'Paid' && (cost === undefined || cost === null || cost === '')) {
+      return res.status(400).json({ message: 'Price is required for paid plans' });
+    }
+    const sortError = validateWholeNumber(displayOrder, 'Display order');
+    if (sortError) return res.status(400).json({ message: sortError });
 
     const newPlan = new Plan(addAuditOnCreate(req, {
-      category,
+      category: category || 'Jobseeker',
       planName,
-      cost,
+      cost: normalizedPlanType === 'Paid' ? Number(cost) : 0,
       planValidity,
-      planType,
+      planType: normalizedPlanType,
       displayOrder: Number(displayOrder) || 0,
       startingDate,
       endDate,
@@ -79,15 +86,21 @@ exports.updatePlan = async (req, res) => {
   try {
     const { uid } = req.params;
     const { category, planName, cost, planValidity, planType, displayOrder, startingDate, endDate, features, status } = req.body;
+    const normalizedPlanType = planType || 'Free';
+    if (normalizedPlanType === 'Paid' && (cost === undefined || cost === null || cost === '')) {
+      return res.status(400).json({ message: 'Price is required for paid plans' });
+    }
+    const sortError = validateWholeNumber(displayOrder, 'Display order');
+    if (sortError) return res.status(400).json({ message: sortError });
 
     const updated = await Plan.findByIdAndUpdate(
       uid,
       addAuditOnUpdate(req, {
-        category,
+        category: category || 'Jobseeker',
         planName,
-        cost,
+        cost: normalizedPlanType === 'Paid' ? Number(cost) : 0,
         planValidity,
-        planType,
+        planType: normalizedPlanType,
         displayOrder: Number(displayOrder) || 0,
         startingDate,
         endDate,

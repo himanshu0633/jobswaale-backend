@@ -1,11 +1,12 @@
 const Country = require('../models/Country');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { activeFilter, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getCountries = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate } = req.query;
 
-    const filter = { isDeleted: { $ne: true } };
+    const filter = activeFilter(req);
     if (paginate === 'true' || page !== undefined) {
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 10;
@@ -37,7 +38,7 @@ exports.getCountries = async (req, res) => {
       const list = await Country.find(filter)
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ cid: 1 });
+        .sort({ countryName: 1, cid: 1 });
       res.json(list);
     }
   } catch (error) {
@@ -51,13 +52,19 @@ exports.createCountry = async (req, res) => {
     if (!cid || !countryName) {
       return res.status(400).json({ message: 'cid and countryName are required' });
     }
+    const cleanCountryName = countryName.trim();
     
-    const exists = await Country.findOne({ $or: [{ cid }, { countryName }] });
+    const exists = await Country.findOne({
+      $or: [
+        { cid },
+        caseInsensitiveExactFilter('countryName', cleanCountryName)
+      ]
+    });
     if (exists) {
       return res.status(400).json({ message: 'Country with this CID or Name already exists' });
     }
 
-    const newCountry = new Country(addAuditOnCreate(req, { cid, countryName, status }));
+    const newCountry = new Country(addAuditOnCreate(req, { cid, countryName: cleanCountryName, status }));
     await newCountry.save();
     res.status(201).json(newCountry);
   } catch (error) {
@@ -74,10 +81,17 @@ exports.updateCountry = async (req, res) => {
     if (!country) {
       return res.status(404).json({ message: 'Country not found' });
     }
+    const cleanCountryName = countryName ? countryName.trim() : countryName;
+    if (cleanCountryName) {
+      const duplicate = await Country.findOne(caseInsensitiveExactFilter('countryName', cleanCountryName, { _id: { $ne: id } }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'Country with this Name already exists' });
+      }
+    }
 
     const updated = await Country.findByIdAndUpdate(
       id,
-      addAuditOnUpdate(req, { countryName, status }),
+      addAuditOnUpdate(req, { countryName: cleanCountryName, status }),
       { new: true }
     );
     res.json(updated);
