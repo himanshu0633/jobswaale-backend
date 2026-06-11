@@ -1,6 +1,6 @@
 const District = require('../models/District');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
-const { activeFilter } = require('../utils/masterHelpers');
+const { activeFilter, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getDistricts = async (req, res) => {
   try {
@@ -57,12 +57,19 @@ exports.createDistrict = async (req, res) => {
       return res.status(400).json({ message: 'sid, did, and districtName are required' });
     }
 
-    const exists = await District.findOne({ did });
+    const cleanDistrictName = districtName.trim();
+
+    const exists = await District.findOne({
+      $or: [
+        { did },
+        caseInsensitiveExactFilter('districtName', cleanDistrictName, { sid })
+      ]
+    });
     if (exists) {
-      return res.status(400).json({ message: 'District with this DID already exists' });
+      return res.status(400).json({ message: 'District with this DID or Name already exists' });
     }
 
-    const newDistrict = new District(addAuditOnCreate(req, { sid, did, districtName, status }));
+    const newDistrict = new District(addAuditOnCreate(req, { sid, did, districtName: cleanDistrictName, status }));
     await newDistrict.save();
     res.status(201).json(newDistrict);
   } catch (error) {
@@ -79,10 +86,20 @@ exports.updateDistrict = async (req, res) => {
     if (!district) {
       return res.status(404).json({ message: 'District not found' });
     }
+    const cleanDistrictName = districtName ? districtName.trim() : districtName;
+    if (cleanDistrictName) {
+      const duplicate = await District.findOne(caseInsensitiveExactFilter('districtName', cleanDistrictName, {
+        sid,
+        _id: { $ne: id }
+      }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'District with this Name already exists' });
+      }
+    }
 
     const updated = await District.findByIdAndUpdate(
       id,
-      addAuditOnUpdate(req, { sid, districtName, status }),
+      addAuditOnUpdate(req, { sid, districtName: cleanDistrictName, status }),
       { new: true }
     );
     res.json(updated);

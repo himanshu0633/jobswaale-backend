@@ -1,6 +1,6 @@
 const Qualification = require('../models/Qualification');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
-const { activeFilter, validateWholeNumber } = require('../utils/masterHelpers');
+const { activeFilter, validateWholeNumber, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getQualifications = async (req, res) => {
   try {
@@ -58,9 +58,16 @@ exports.createQualification = async (req, res) => {
       return res.status(400).json({ message: 'ID and Name are required' });
     }
 
+    const cleanName = name.trim();
+
     const exists = await Qualification.findOne({ id });
     if (exists) {
       return res.status(400).json({ message: 'Record with this ID already exists' });
+    }
+
+    const nameExists = await Qualification.findOne(caseInsensitiveExactFilter('name', cleanName));
+    if (nameExists) {
+      return res.status(400).json({ message: 'Qualification with this Name already exists' });
     }
 
     const sortError = validateWholeNumber(sortingNo);
@@ -73,7 +80,7 @@ exports.createQualification = async (req, res) => {
       }
     }
 
-    const item = new Qualification(addAuditOnCreate(req, { id, name, sortingNo, status }));
+    const item = new Qualification(addAuditOnCreate(req, { id, name: cleanName, sortingNo, status }));
     await item.save();
     res.status(201).json(item);
   } catch (error) {
@@ -85,6 +92,14 @@ exports.updateQualification = async (req, res) => {
   try {
     const { uid } = req.params;
     const { name, sortingNo, status } = req.body;
+
+    const cleanName = name ? name.trim() : name;
+    if (cleanName) {
+      const duplicate = await Qualification.findOne(caseInsensitiveExactFilter('name', cleanName, { _id: { $ne: uid } }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'Qualification with this Name already exists' });
+      }
+    }
 
     const sortError = validateWholeNumber(sortingNo);
     if (sortError) return res.status(400).json({ message: sortError });
@@ -98,7 +113,7 @@ exports.updateQualification = async (req, res) => {
 
     const updated = await Qualification.findByIdAndUpdate(
       uid,
-      addAuditOnUpdate(req, { name, sortingNo, status }),
+      addAuditOnUpdate(req, { name: cleanName, sortingNo, status }),
       { new: true }
     );
     res.json(updated);

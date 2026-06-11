@@ -1,6 +1,6 @@
 const JobType = require('../models/JobType');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
-const { activeFilter, validateWholeNumber } = require('../utils/masterHelpers');
+const { activeFilter, validateWholeNumber, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getJobTypes = async (req, res) => {
   try {
@@ -59,9 +59,16 @@ exports.createJobType = async (req, res) => {
       return res.status(400).json({ message: 'ID and JobType name are required' });
     }
 
+    const cleanJobType = jobType.trim();
+
     const exists = await JobType.findOne({ id });
     if (exists) {
       return res.status(400).json({ message: 'Record with this ID already exists' });
+    }
+
+    const nameExists = await JobType.findOne(caseInsensitiveExactFilter('jobType', cleanJobType));
+    if (nameExists) {
+      return res.status(400).json({ message: 'Job type with this Name already exists' });
     }
 
     const sortError = validateWholeNumber(sortingNo);
@@ -74,7 +81,7 @@ exports.createJobType = async (req, res) => {
       }
     }
 
-    const item = new JobType(addAuditOnCreate(req, { id, jobType, sortingNo, status }));
+    const item = new JobType(addAuditOnCreate(req, { id, jobType: cleanJobType, sortingNo, status }));
     await item.save();
     res.status(201).json(item);
   } catch (error) {
@@ -86,6 +93,14 @@ exports.updateJobType = async (req, res) => {
   try {
     const { uid } = req.params;
     const { jobType, sortingNo, status } = req.body;
+
+    const cleanJobType = jobType ? jobType.trim() : jobType;
+    if (cleanJobType) {
+      const duplicate = await JobType.findOne(caseInsensitiveExactFilter('jobType', cleanJobType, { _id: { $ne: uid } }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'Job type with this Name already exists' });
+      }
+    }
 
     const sortError = validateWholeNumber(sortingNo);
     if (sortError) return res.status(400).json({ message: sortError });
@@ -99,7 +114,7 @@ exports.updateJobType = async (req, res) => {
 
     const updated = await JobType.findByIdAndUpdate(
       uid,
-      addAuditOnUpdate(req, { jobType, sortingNo, status }),
+      addAuditOnUpdate(req, { jobType: cleanJobType, sortingNo, status }),
       { new: true }
     );
     res.json(updated);

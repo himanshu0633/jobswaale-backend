@@ -1,6 +1,6 @@
 const IndustryType = require('../models/IndustryType');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
-const { activeFilter, validateWholeNumber } = require('../utils/masterHelpers');
+const { activeFilter, validateWholeNumber, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getIndustryTypes = async (req, res) => {
   try {
@@ -59,9 +59,16 @@ exports.createIndustryType = async (req, res) => {
       return res.status(400).json({ message: 'ID and IndustryType name are required' });
     }
 
+    const cleanIndustryType = industryType.trim();
+
     const exists = await IndustryType.findOne({ id });
     if (exists) {
       return res.status(400).json({ message: 'Record with this ID already exists' });
+    }
+
+    const nameExists = await IndustryType.findOne(caseInsensitiveExactFilter('industryType', cleanIndustryType));
+    if (nameExists) {
+      return res.status(400).json({ message: 'Industry type with this Name already exists' });
     }
 
     const sortError = validateWholeNumber(sortingNo);
@@ -74,7 +81,7 @@ exports.createIndustryType = async (req, res) => {
       }
     }
 
-    const item = new IndustryType(addAuditOnCreate(req, { id, industryType, sortingNo, status }));
+    const item = new IndustryType(addAuditOnCreate(req, { id, industryType: cleanIndustryType, sortingNo, status }));
     await item.save();
     res.status(201).json(item);
   } catch (error) {
@@ -86,6 +93,14 @@ exports.updateIndustryType = async (req, res) => {
   try {
     const { uid } = req.params;
     const { industryType, sortingNo, status } = req.body;
+
+    const cleanIndustryType = industryType ? industryType.trim() : industryType;
+    if (cleanIndustryType) {
+      const duplicate = await IndustryType.findOne(caseInsensitiveExactFilter('industryType', cleanIndustryType, { _id: { $ne: uid } }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'Industry type with this Name already exists' });
+      }
+    }
 
     const sortError = validateWholeNumber(sortingNo);
     if (sortError) return res.status(400).json({ message: sortError });
@@ -99,7 +114,7 @@ exports.updateIndustryType = async (req, res) => {
 
     const updated = await IndustryType.findByIdAndUpdate(
       uid,
-      addAuditOnUpdate(req, { industryType, sortingNo, status }),
+      addAuditOnUpdate(req, { industryType: cleanIndustryType, sortingNo, status }),
       { new: true }
     );
     res.json(updated);

@@ -1,6 +1,6 @@
 const Feature = require('../models/Feature');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
-const { activeFilter, validateWholeNumber } = require('../utils/masterHelpers');
+const { activeFilter, validateWholeNumber, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getFeatures = async (req, res) => {
   try {
@@ -58,9 +58,16 @@ exports.createFeature = async (req, res) => {
       return res.status(400).json({ message: 'ID and FeatureName are required' });
     }
 
+    const cleanFeatureName = featureName.trim();
+
     const exists = await Feature.findOne({ id });
     if (exists) {
       return res.status(400).json({ message: 'Record with this ID already exists' });
+    }
+
+    const nameExists = await Feature.findOne(caseInsensitiveExactFilter('featureName', cleanFeatureName));
+    if (nameExists) {
+      return res.status(400).json({ message: 'Feature with this Name already exists' });
     }
 
     const sortError = validateWholeNumber(displayOrder, 'Display order');
@@ -73,7 +80,7 @@ exports.createFeature = async (req, res) => {
       }
     }
 
-    const item = new Feature(addAuditOnCreate(req, { id, featureName, displayOrder, status }));
+    const item = new Feature(addAuditOnCreate(req, { id, featureName: cleanFeatureName, displayOrder, status }));
     await item.save();
     res.status(201).json(item);
   } catch (error) {
@@ -85,6 +92,14 @@ exports.updateFeature = async (req, res) => {
   try {
     const { uid } = req.params;
     const { featureName, displayOrder, status } = req.body;
+
+    const cleanFeatureName = featureName ? featureName.trim() : featureName;
+    if (cleanFeatureName) {
+      const duplicate = await Feature.findOne(caseInsensitiveExactFilter('featureName', cleanFeatureName, { _id: { $ne: uid } }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'Feature with this Name already exists' });
+      }
+    }
 
     const sortError = validateWholeNumber(displayOrder, 'Display order');
     if (sortError) return res.status(400).json({ message: sortError });
@@ -98,7 +113,7 @@ exports.updateFeature = async (req, res) => {
 
     const updated = await Feature.findByIdAndUpdate(
       uid,
-      addAuditOnUpdate(req, { featureName, displayOrder, status }),
+      addAuditOnUpdate(req, { featureName: cleanFeatureName, displayOrder, status }),
       { new: true }
     );
     res.json(updated);

@@ -1,6 +1,6 @@
 const JobCategory = require('../models/JobCategory');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
-const { activeFilter, validateWholeNumber } = require('../utils/masterHelpers');
+const { activeFilter, validateWholeNumber, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getJobCategories = async (req, res) => {
   try {
@@ -58,9 +58,16 @@ exports.createJobCategory = async (req, res) => {
       return res.status(400).json({ message: 'ID and CategoryName are required' });
     }
 
+    const cleanCategoryName = categoryName.trim();
+
     const exists = await JobCategory.findOne({ id });
     if (exists) {
       return res.status(400).json({ message: 'Record with this ID already exists' });
+    }
+
+    const nameExists = await JobCategory.findOne(caseInsensitiveExactFilter('categoryName', cleanCategoryName));
+    if (nameExists) {
+      return res.status(400).json({ message: 'Job category with this Name already exists' });
     }
 
     const sortError = validateWholeNumber(sortingNo);
@@ -73,7 +80,7 @@ exports.createJobCategory = async (req, res) => {
       }
     }
 
-    const item = new JobCategory(addAuditOnCreate(req, { id, categoryName, sortingNo, status }));
+    const item = new JobCategory(addAuditOnCreate(req, { id, categoryName: cleanCategoryName, sortingNo, status }));
     await item.save();
     res.status(201).json(item);
   } catch (error) {
@@ -85,6 +92,14 @@ exports.updateJobCategory = async (req, res) => {
   try {
     const { uid } = req.params;
     const { categoryName, sortingNo, status } = req.body;
+
+    const cleanCategoryName = categoryName ? categoryName.trim() : categoryName;
+    if (cleanCategoryName) {
+      const duplicate = await JobCategory.findOne(caseInsensitiveExactFilter('categoryName', cleanCategoryName, { _id: { $ne: uid } }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'Job category with this Name already exists' });
+      }
+    }
 
     const sortError = validateWholeNumber(sortingNo);
     if (sortError) return res.status(400).json({ message: sortError });
@@ -98,7 +113,7 @@ exports.updateJobCategory = async (req, res) => {
 
     const updated = await JobCategory.findByIdAndUpdate(
       uid,
-      addAuditOnUpdate(req, { categoryName, sortingNo, status }),
+      addAuditOnUpdate(req, { categoryName: cleanCategoryName, sortingNo, status }),
       { new: true }
     );
     res.json(updated);

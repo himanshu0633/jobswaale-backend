@@ -1,6 +1,6 @@
 const Plan = require('../models/Plan');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
-const { validateWholeNumber } = require('../utils/masterHelpers');
+const { validateWholeNumber, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 
 exports.getPlans = async (req, res) => {
   try {
@@ -55,6 +55,11 @@ exports.createPlan = async (req, res) => {
     if (!planName || !planValidity) {
       return res.status(400).json({ message: 'planName and planValidity are required' });
     }
+    const cleanPlanName = planName.trim();
+    const nameExists = await Plan.findOne(caseInsensitiveExactFilter('planName', cleanPlanName));
+    if (nameExists) {
+      return res.status(400).json({ message: 'Plan with this Name already exists' });
+    }
     if (normalizedPlanType === 'Paid' && (cost === undefined || cost === null || cost === '')) {
       return res.status(400).json({ message: 'Price is required for paid plans' });
     }
@@ -63,7 +68,7 @@ exports.createPlan = async (req, res) => {
 
     const newPlan = new Plan(addAuditOnCreate(req, {
       category: category || 'Jobseeker',
-      planName,
+      planName: cleanPlanName,
       cost: normalizedPlanType === 'Paid' ? Number(cost) : 0,
       planValidity,
       planType: normalizedPlanType,
@@ -87,6 +92,13 @@ exports.updatePlan = async (req, res) => {
     const { uid } = req.params;
     const { category, planName, cost, planValidity, planType, displayOrder, startingDate, endDate, features, status } = req.body;
     const normalizedPlanType = planType || 'Free';
+    const cleanPlanName = planName ? planName.trim() : planName;
+    if (cleanPlanName) {
+      const duplicate = await Plan.findOne(caseInsensitiveExactFilter('planName', cleanPlanName, { _id: { $ne: uid } }));
+      if (duplicate) {
+        return res.status(400).json({ message: 'Plan with this Name already exists' });
+      }
+    }
     if (normalizedPlanType === 'Paid' && (cost === undefined || cost === null || cost === '')) {
       return res.status(400).json({ message: 'Price is required for paid plans' });
     }
@@ -97,7 +109,7 @@ exports.updatePlan = async (req, res) => {
       uid,
       addAuditOnUpdate(req, {
         category: category || 'Jobseeker',
-        planName,
+        planName: cleanPlanName,
         cost: normalizedPlanType === 'Paid' ? Number(cost) : 0,
         planValidity,
         planType: normalizedPlanType,
