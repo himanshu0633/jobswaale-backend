@@ -114,7 +114,7 @@ exports.updateJobCategory = async (req, res) => {
     const updated = await JobCategory.findByIdAndUpdate(
       uid,
       addAuditOnUpdate(req, { categoryName: cleanCategoryName, sortingNo, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {

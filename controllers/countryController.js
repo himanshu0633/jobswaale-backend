@@ -92,7 +92,7 @@ exports.updateCountry = async (req, res) => {
     const updated = await Country.findByIdAndUpdate(
       id,
       addAuditOnUpdate(req, { countryName: cleanCountryName, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {

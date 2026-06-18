@@ -99,7 +99,7 @@ exports.updateState = async (req, res) => {
     const updated = await State.findByIdAndUpdate(
       id,
       addAuditOnUpdate(req, { cid, stateName: cleanStateName, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {

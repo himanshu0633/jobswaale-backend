@@ -114,7 +114,7 @@ exports.updateQualification = async (req, res) => {
     const updated = await Qualification.findByIdAndUpdate(
       uid,
       addAuditOnUpdate(req, { name: cleanName, sortingNo, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {

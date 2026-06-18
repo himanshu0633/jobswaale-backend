@@ -30,10 +30,11 @@ exports.getPages = async (req, res) => {
       const skip = (pageNum - 1) * limitNum;
       const total = await Page.countDocuments(filter);
       const docs = await Page.find(filter)
+        .populate('parentPage', 'title slug')
         .populate('createdBy', 'email')
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ updatedAt: -1 })
+        .sort({ sortingOrder: 1, updatedAt: -1 })
         .skip(skip)
         .limit(limitNum);
 
@@ -46,7 +47,7 @@ exports.getPages = async (req, res) => {
       });
     }
 
-    const docs = await Page.find(filter).sort({ title: 1 });
+    const docs = await Page.find(filter).populate('parentPage', 'title slug').sort({ sortingOrder: 1, title: 1 });
     res.json(docs);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -55,7 +56,7 @@ exports.getPages = async (req, res) => {
 
 exports.getPage = async (req, res) => {
   try {
-    const page = await Page.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+    const page = await Page.findOne({ _id: req.params.id, isDeleted: { $ne: true } }).populate('parentPage', 'title slug');
     if (!page) return res.status(404).json({ message: 'Page not found' });
     res.json(page);
   } catch (error) {
@@ -76,7 +77,20 @@ exports.getPublicPage = async (req, res) => {
 
 exports.createPage = async (req, res) => {
   try {
-    const { title, slug, html, css, projectData, published } = req.body;
+    const {
+      title,
+      slug,
+      html,
+      css,
+      projectData,
+      published,
+      parentPage,
+      featuredImage,
+      sortingOrder,
+      seoTitle,
+      seoDescription,
+      seoKeywords
+    } = req.body;
     if (!title) return res.status(400).json({ message: 'Page title is required' });
 
     const cleanSlug = normalizeSlug(slug || title);
@@ -90,6 +104,12 @@ exports.createPage = async (req, res) => {
       css,
       projectData: projectData || {},
       published: Boolean(published),
+      parentPage: parentPage || null,
+      featuredImage: featuredImage || '',
+      sortingOrder: Number(sortingOrder) || 10,
+      seoTitle: seoTitle || '',
+      seoDescription: seoDescription || '',
+      seoKeywords: seoKeywords || '',
       createdBy: req.user ? req.user._id : null
     }));
 
@@ -102,7 +122,20 @@ exports.createPage = async (req, res) => {
 
 exports.updatePage = async (req, res) => {
   try {
-    const { title, slug, html, css, projectData, published } = req.body;
+    const {
+      title,
+      slug,
+      html,
+      css,
+      projectData,
+      published,
+      parentPage,
+      featuredImage,
+      sortingOrder,
+      seoTitle,
+      seoDescription,
+      seoKeywords
+    } = req.body;
     if (!title) return res.status(400).json({ message: 'Page title is required' });
 
     const cleanSlug = normalizeSlug(slug || title);
@@ -121,9 +154,15 @@ exports.updatePage = async (req, res) => {
         html,
         css,
         projectData: projectData || {},
-        published: Boolean(published)
+        published: Boolean(published),
+        parentPage: parentPage || null,
+        featuredImage: featuredImage || '',
+        sortingOrder: Number(sortingOrder) || 10,
+        seoTitle: seoTitle || '',
+        seoDescription: seoDescription || '',
+        seoKeywords: seoKeywords || ''
       }),
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!page) return res.status(404).json({ message: 'Page not found' });
@@ -135,7 +174,7 @@ exports.updatePage = async (req, res) => {
 
 exports.deletePage = async (req, res) => {
   try {
-    const page = await Page.findByIdAndUpdate(req.params.id, addAuditOnUpdate(req, { isDeleted: true }), { new: true });
+    const page = await Page.findByIdAndUpdate(req.params.id, addAuditOnUpdate(req, { isDeleted: true }), { returnDocument: 'after' });
     if (!page) return res.status(404).json({ message: 'Page not found' });
     res.json({ message: 'Page deleted successfully' });
   } catch (error) {

@@ -119,7 +119,7 @@ exports.updatePlan = async (req, res) => {
         features: features || [],
         status
       }),
-      { new: true }
+      { returnDocument: 'after' }
     ).populate('features');
 
     res.json(updated);

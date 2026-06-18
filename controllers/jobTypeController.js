@@ -115,7 +115,7 @@ exports.updateJobType = async (req, res) => {
     const updated = await JobType.findByIdAndUpdate(
       uid,
       addAuditOnUpdate(req, { jobType: cleanJobType, sortingNo, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {

@@ -13,6 +13,31 @@ const PageSchema = new mongoose.Schema({
     lowercase: true,
     trim: true
   },
+  parentPage: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Page',
+    default: null
+  },
+  featuredImage: {
+    type: String,
+    default: ''
+  },
+  sortingOrder: {
+    type: Number,
+    default: 10
+  },
+  seoTitle: {
+    type: String,
+    default: ''
+  },
+  seoDescription: {
+    type: String,
+    default: ''
+  },
+  seoKeywords: {
+    type: String,
+    default: ''
+  },
   html: {
     type: String,
     default: ''

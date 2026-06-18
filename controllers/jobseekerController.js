@@ -160,7 +160,7 @@ exports.updateJobseeker = async (req, res) => {
         ip: req.clientIp || '127.0.0.1',
         updatedLogin: req.user ? req.user._id : null
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     res.json(updated);

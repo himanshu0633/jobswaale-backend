@@ -114,7 +114,7 @@ exports.updateFeature = async (req, res) => {
     const updated = await Feature.findByIdAndUpdate(
       uid,
       addAuditOnUpdate(req, { featureName: cleanFeatureName, displayOrder, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {

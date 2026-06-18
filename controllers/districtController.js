@@ -100,7 +100,7 @@ exports.updateDistrict = async (req, res) => {
     const updated = await District.findByIdAndUpdate(
       id,
       addAuditOnUpdate(req, { sid, districtName: cleanDistrictName, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {

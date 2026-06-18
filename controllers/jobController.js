@@ -39,7 +39,8 @@ exports.createJob = async (req, res) => {
       currentPlan, 
       planValidity, 
       document,
-      status 
+      status,
+      blacklistReason 
     } = req.body;
 
     if (!jobTitle || !jobCategory || !jobType || !vacancies || !description || !experience || !companyName || !email || !phone) {
@@ -69,6 +70,7 @@ exports.createJob = async (req, res) => {
       planValidity: planValidity || null,
       document,
       status: status || 'active',
+      blacklistReason: blacklistReason || '',
       ip: req.clientIp || '127.0.0.1',
       login: req.user ? req.user._id : null
     });
@@ -105,7 +107,8 @@ exports.updateJob = async (req, res) => {
       currentPlan, 
       planValidity, 
       document,
-      status 
+      status,
+      blacklistReason 
     } = req.body;
 
     const job = await Job.findById(id);
@@ -138,10 +141,11 @@ exports.updateJob = async (req, res) => {
         planValidity: planValidity || null,
         document,
         status: status || job.status,
+        blacklistReason: blacklistReason || '',
         ip: req.clientIp || '127.0.0.1',
         updatedLogin: req.user ? req.user._id : null
       },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     res.json(updated);

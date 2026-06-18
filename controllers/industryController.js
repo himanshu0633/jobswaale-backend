@@ -115,7 +115,7 @@ exports.updateIndustryType = async (req, res) => {
     const updated = await IndustryType.findByIdAndUpdate(
       uid,
       addAuditOnUpdate(req, { industryType: cleanIndustryType, sortingNo, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {

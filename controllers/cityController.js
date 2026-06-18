@@ -96,7 +96,7 @@ exports.updateCity = async (req, res) => {
     const updated = await City.findByIdAndUpdate(
       id,
       addAuditOnUpdate(req, { cid, sid, did, cityName: cleanCityName, status }),
-      { new: true }
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error) {
