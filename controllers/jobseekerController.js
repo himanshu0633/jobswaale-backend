@@ -1,5 +1,6 @@
 const Jobseeker = require('../models/Jobseeker');
 const User = require('../models/User');
+const { validateMobileNumber, findDuplicateMobile } = require('../utils/userCredentials');
 
 exports.getJobseekers = async (req, res) => {
   try {
@@ -54,18 +55,26 @@ exports.createJobseeker = async (req, res) => {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
 
+    const normalizedPhone = validateMobileNumber(phone);
+    const phoneExists = await findDuplicateMobile(normalizedPhone);
+    if (phoneExists) {
+      return res.status(400).json({ message: 'Mobile number already exists' });
+    }
+
     // Create user credentials
     const user = await User.create({
       email,
+      phone: normalizedPhone,
       password,
       role: 'Jobseeker',
+      accountType: 'jobseeker',
       status: status === 'blacklist' ? 'inactive' : 'active'
     });
 
     const jobseeker = new Jobseeker({
       userId: user._id,
       name,
-      phone,
+      phone: normalizedPhone,
       gender,
       qualification,
       industryType: industryType || null,
@@ -127,17 +136,30 @@ exports.updateJobseeker = async (req, res) => {
       return res.status(404).json({ message: 'Jobseeker profile not found' });
     }
 
+    const normalizedPhone = validateMobileNumber(phone);
+    const phoneExists = await findDuplicateMobile(normalizedPhone, {
+      userId: jobseeker.userId,
+      jobseekerId: jobseeker._id
+    });
+    if (phoneExists) {
+      return res.status(400).json({ message: 'Mobile number already exists' });
+    }
+
     if (status && status !== jobseeker.status) {
       await User.findByIdAndUpdate(jobseeker.userId, {
         status: status === 'blacklist' ? 'inactive' : 'active'
       });
     }
 
+    await User.findByIdAndUpdate(jobseeker.userId, {
+      phone: normalizedPhone
+    });
+
     const updated = await Jobseeker.findByIdAndUpdate(
       id,
       {
         name,
-        phone,
+        phone: normalizedPhone,
         gender,
         qualification,
         industryType: industryType || null,

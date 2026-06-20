@@ -1,5 +1,6 @@
 const Employer = require('../models/Employer');
 const User = require('../models/User');
+const { validateMobileNumber, findDuplicateMobile } = require('../utils/userCredentials');
 
 exports.getEmployers = async (req, res) => {
   try {
@@ -47,11 +48,19 @@ exports.createEmployer = async (req, res) => {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
 
+    const normalizedPhone = validateMobileNumber(phone);
+    const phoneExists = await findDuplicateMobile(normalizedPhone);
+    if (phoneExists) {
+      return res.status(400).json({ message: 'Mobile number already exists' });
+    }
+
     // Create user credentials
     const user = await User.create({
       email,
+      phone: normalizedPhone,
       password,
       role: 'Employer',
+      accountType: 'employer',
       status: status === 'blacklist' ? 'inactive' : 'active'
     });
 
@@ -59,7 +68,7 @@ exports.createEmployer = async (req, res) => {
       userId: user._id,
       companyName,
       contactPerson,
-      phone,
+      phone: normalizedPhone,
       industryType,
       website,
       description,
@@ -112,18 +121,31 @@ exports.updateEmployer = async (req, res) => {
       return res.status(404).json({ message: 'Employer profile not found' });
     }
 
+    const normalizedPhone = validateMobileNumber(phone);
+    const phoneExists = await findDuplicateMobile(normalizedPhone, {
+      userId: employer.userId,
+      employerId: employer._id
+    });
+    if (phoneExists) {
+      return res.status(400).json({ message: 'Mobile number already exists' });
+    }
+
     if (status && status !== employer.status) {
       await User.findByIdAndUpdate(employer.userId, {
         status: status === 'blacklist' ? 'inactive' : 'active'
       });
     }
 
+    await User.findByIdAndUpdate(employer.userId, {
+      phone: normalizedPhone
+    });
+
     const updated = await Employer.findByIdAndUpdate(
       id,
       {
         companyName,
         contactPerson,
-        phone,
+        phone: normalizedPhone,
         industryType,
         website,
         description,

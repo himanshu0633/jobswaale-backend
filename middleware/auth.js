@@ -7,7 +7,7 @@ const protect = async (req, res, next) => {
     try {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
-      req.user = await User.findById(decoded.id).select('-password');
+      req.user = await User.findById(decoded.id).select('-password').populate('roleRef');
       if (!req.user) {
         return res.status(401).json({ message: 'User no longer exists' });
       }
@@ -34,4 +34,15 @@ const authorize = (...roles) => {
   };
 };
 
-module.exports = { protect, authorize };
+const authorizeAdminPortal = (req, res, next) => {
+  const isLegacyAdmin = req.user?.role === 'Admin';
+  const isCustomAdmin = req.user?.accountType === 'admin' && req.user?.roleRef;
+
+  if (!isLegacyAdmin && !isCustomAdmin) {
+    return res.status(403).json({ message: 'Admin portal access is required' });
+  }
+
+  next();
+};
+
+module.exports = { protect, authorize, authorizeAdminPortal };

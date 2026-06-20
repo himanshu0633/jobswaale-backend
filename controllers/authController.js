@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const { allPermissions } = require('../utils/permissions');
 
 // Helper to generate JWT token
 const generateToken = (id) => {
@@ -36,6 +37,7 @@ exports.register = async (req, res) => {
       email,
       password,
       role,
+      accountType: role === 'Employer' ? 'employer' : 'jobseeker',
       status: 'active'
     });
 
@@ -62,7 +64,7 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: 'Please provide email and password' });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).populate('roleRef');
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
@@ -76,10 +78,24 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
+    user.lastLogin = new Date();
+    await user.save();
+
+    const rolePermissions = user.role === 'Admin'
+      ? allPermissions
+      : (user.roleRef?.permissions || []);
+
     res.json({
       _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
       email: user.email,
       role: user.role,
+      roleRef: user.roleRef?._id || null,
+      roleName: user.roleRef?.name || user.role,
+      accountType: user.accountType,
+      permissions: rolePermissions,
       token: generateToken(user._id)
     });
   } catch (error) {
@@ -107,6 +123,7 @@ exports.seedAdmin = async (req, res) => {
       email,
       password,
       role: 'Admin',
+      accountType: 'admin',
       status: 'active'
     });
 
@@ -141,6 +158,7 @@ exports.createAdmin = async (req, res) => {
       email,
       password,
       role: 'Admin',
+      accountType: 'admin',
       status: 'active'
     });
 
