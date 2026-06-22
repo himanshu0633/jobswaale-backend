@@ -32,10 +32,15 @@ app.use('/api/masters', require('./routes/qualificationRoutes'));
 app.use('/api/masters', require('./routes/planMappingRoutes'));
 app.use('/api/cms', require('./routes/pageRoutes'));
 app.use('/api/cms', require('./routes/headerRoutes'));
+app.use('/api/cms', require('./routes/blogCategoryRoutes'));
+app.use('/api/cms', require('./routes/blogRoutes'));
 app.use('/api/employers', require('./routes/employerRoutes'));
 app.use('/api/jobseekers', require('./routes/jobseekerRoutes'));
 app.use('/api/jobs', require('./routes/jobRoutes'));
 app.use('/api/payments', require('./routes/paymentRoutes'));
+app.use('/api/payments', require('./routes/transactionRoutes'));
+app.use('/api/reports', require('./routes/reportRoutes'));
+
 
 // Root endpoint
 app.get('/', (req, res) => {
