@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, authorizeAdminPortal } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
 const { getQualifications, createQualification, updateQualification, deleteQualification } = require('../controllers/qualificationController');
 
-router.use(protect);
+router.use(protect, authorizeAdminPortal);
 router.get('/qualifications', getQualifications);
 router.post('/qualifications', authorize('Admin'), auditMiddleware, createQualification);
 router.put('/qualifications/:uid', authorize('Admin'), auditMiddleware, updateQualification);

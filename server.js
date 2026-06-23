@@ -34,7 +34,6 @@ app.use('/api/masters', require('./routes/planRoutes'));
 app.use('/api/masters', require('./routes/qualificationRoutes'));
 app.use('/api/masters', require('./routes/planMappingRoutes'));
 app.use('/api/cms', require('./routes/pageRoutes'));
-app.use('/api/cms', require('./routes/headerRoutes'));
 app.use('/api/cms', require('./routes/blogCategoryRoutes'));
 app.use('/api/cms', require('./routes/blogRoutes'));
 app.use('/api/employers', require('./routes/employerRoutes'));

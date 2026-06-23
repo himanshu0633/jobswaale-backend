@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, authorizeAdminPortal } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
 const {
   getBlogCategories,
@@ -9,7 +9,7 @@ const {
   deleteBlogCategory
 } = require('../controllers/blogCategoryController');
 
-router.use(protect);
+router.use(protect, authorizeAdminPortal);
 router.get('/blog-categories', getBlogCategories);
 router.post('/blog-categories', authorize('Admin'), auditMiddleware, createBlogCategory);
 router.put('/blog-categories/:uid', authorize('Admin'), auditMiddleware, updateBlogCategory);

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { protect } = require('../middleware/auth');
+const { protect, authorizeAdminPortal } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
 const {
   getEmployers,
@@ -10,7 +10,7 @@ const {
   updateEmployerStatus
 } = require('../controllers/employerController');
 
-router.use(protect);
+router.use(protect, authorizeAdminPortal);
 
 router.get('/', getEmployers);
 router.post('/', auditMiddleware, createEmployer);

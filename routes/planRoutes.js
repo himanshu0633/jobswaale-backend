@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, authorizeAdminPortal } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
 const { getPlans, createPlan, updatePlan, deletePlan } = require('../controllers/planController');
 
-router.use(protect);
+router.use(protect, authorizeAdminPortal);
 router.get('/plans', getPlans);
 router.post('/plans', authorize('Admin'), auditMiddleware, createPlan);
 router.put('/plans/:uid', authorize('Admin'), auditMiddleware, updatePlan);

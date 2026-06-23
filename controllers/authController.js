@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { allPermissions } = require('../utils/permissions');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
+const { isSuperAdminAccount } = require('../middleware/auth');
 
 // Helper to generate JWT token
 const generateToken = (id, expiresIn = '30d') => {
@@ -113,6 +114,10 @@ exports.login = async (req, res) => {
       }
       await user.save();
       return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    if (!isSuperAdminAccount(user)) {
+      return res.status(403).json({ message: 'Only super admin can access the admin portal' });
     }
 
     if (settings.passExpiry > 0 && user.passwordChangedAt) {

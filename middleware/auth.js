@@ -1,6 +1,14 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+const SUPER_ADMIN_ROLES = ['admin', 'superadmin', 'super admin'];
+
+const isSuperAdminAccount = (user) => {
+  const role = String(user?.role || '').trim().toLowerCase();
+  const roleName = String(user?.roleRef?.name || user?.roleName || '').trim().toLowerCase();
+  return SUPER_ADMIN_ROLES.includes(role) || SUPER_ADMIN_ROLES.includes(roleName);
+};
+
 const protect = async (req, res, next) => {
   let token;
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
@@ -27,7 +35,8 @@ const protect = async (req, res, next) => {
 
 const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.role)) {
+    const allowed = roles.includes(req.user?.role) || (roles.includes('Admin') && isSuperAdminAccount(req.user));
+    if (!req.user || !allowed) {
       return res.status(403).json({ message: `Role ${req.user ? req.user.role : 'Guest'} is not authorized` });
     }
     next();
@@ -35,14 +44,11 @@ const authorize = (...roles) => {
 };
 
 const authorizeAdminPortal = (req, res, next) => {
-  const isLegacyAdmin = req.user?.role === 'Admin';
-  const isCustomAdmin = req.user?.accountType === 'admin' && req.user?.roleRef;
-
-  if (!isLegacyAdmin && !isCustomAdmin) {
-    return res.status(403).json({ message: 'Admin portal access is required' });
+  if (!isSuperAdminAccount(req.user)) {
+    return res.status(403).json({ message: 'Super admin access is required' });
   }
 
   next();
 };
 
-module.exports = { protect, authorize, authorizeAdminPortal };
+module.exports = { protect, authorize, authorizeAdminPortal, isSuperAdminAccount };

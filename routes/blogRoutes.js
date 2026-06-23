@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, authorizeAdminPortal } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
 const {
   getBlogs,
@@ -15,7 +15,7 @@ const {
 router.get('/public/blogs', getPublicBlogs);
 router.get('/public/blogs/:slug', getPublicBlogBySlug);
 
-router.use(protect);
+router.use(protect, authorizeAdminPortal);
 router.get('/blogs', getBlogs);
 router.get('/blogs/:id', getBlog);
 router.post('/blogs', authorize('Admin'), auditMiddleware, createBlog);
