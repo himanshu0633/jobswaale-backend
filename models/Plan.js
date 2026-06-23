@@ -11,6 +11,11 @@ const PlanSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  planSubtitle: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   cost: {
     type: Number,
     required: true,
@@ -18,7 +23,7 @@ const PlanSchema = new mongoose.Schema({
   },
   planValidity: {
     type: String,
-    enum: ['One Time', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'Always Free'],
+    enum: ['One Time', 'Weekly', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'Always Free'],
     required: true
   },
   startingDate: {
@@ -35,6 +40,42 @@ const PlanSchema = new mongoose.Schema({
   displayOrder: {
     type: Number,
     default: 0
+  },
+  unlockCount: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  freeJobPosts: {
+    type: Number,
+    default: 0
+  },
+  showBadge: {
+    type: Boolean,
+    default: false
+  },
+  badge: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  employerFeatures: [{
+    type: String,
+    trim: true
+  }],
+  offerEnabled: {
+    type: Boolean,
+    default: false
+  },
+  offerTitle: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  offerDescription: {
+    type: String,
+    trim: true,
+    default: ''
   },
   features: [{
     type: mongoose.Schema.Types.ObjectId,

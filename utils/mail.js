@@ -40,38 +40,104 @@ const buildUserWelcomeEmail = ({ firstName, email, password, roleName }) => {
   `;
 };
 
-const sendUserWelcomeEmail = async ({ to, firstName, password, roleName }) => {
-  if (!process.env.SMTP_HOST) {
-    console.log(`Mail skipped. SMTP_HOST not configured. User: ${to}, Password: ${password}`);
-    return { sent: false, reason: 'SMTP_HOST not configured' };
+const { getSettings } = require('./settings');
+
+const createTransportFromSettings = (settings = {}) => {
+  const host = settings.mailHost || process.env.SMTP_HOST;
+  if (!host) {
+    throw new Error('SMTP settings are not configured');
   }
 
   let nodemailer;
   try {
     nodemailer = require('nodemailer');
   } catch (error) {
-    console.log(`Mail skipped. Install nodemailer to send emails. User: ${to}, Password: ${password}`);
-    return { sent: false, reason: 'nodemailer not installed' };
+    throw new Error('nodemailer not installed');
   }
 
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: process.env.SMTP_USER ? {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
+  const user = settings.mailUsername || process.env.SMTP_USER;
+  const pass = settings.mailPassword || process.env.SMTP_PASS;
+
+  return nodemailer.createTransport({
+    host,
+    port: Number(settings.mailPort || process.env.SMTP_PORT || 587),
+    secure: settings.mailEncryption === 'ssl' || process.env.SMTP_SECURE === 'true',
+    auth: user ? {
+      user,
+      pass
     } : undefined
   });
-
-  await transporter.sendMail({
-    from: process.env.MAIL_FROM || 'JobsWaale <no-reply@jobswaale.com>',
-    to,
-    subject: 'Your JobsWaale Admin Account',
-    html: buildUserWelcomeEmail({ firstName, email: to, password, roleName })
-  });
-
-  return { sent: true };
 };
 
-module.exports = { buildUserWelcomeEmail, sendUserWelcomeEmail };
+const getMailFrom = (settings = {}) => {
+  const fromEmail = settings.mailFromEmail || settings.siteEmail || 'no-reply@jobswaale.com';
+  const fromName = settings.mailFromName || settings.siteName || 'JobsWaale';
+  return `${fromName} <${fromEmail}>`;
+};
+
+const escapeHtml = (value = '') => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const sendUserWelcomeEmail = async ({ to, firstName, password, roleName }) => {
+  let settings;
+  try {
+    settings = await getSettings();
+    const transporter = createTransportFromSettings(settings);
+
+    await transporter.sendMail({
+      from: getMailFrom(settings),
+      to,
+      subject: 'Your JobsWaale Admin Account',
+      html: buildUserWelcomeEmail({ firstName, email: to, password, roleName })
+    });
+
+    return { sent: true };
+  } catch (error) {
+    console.log(`Mail skipped. ${error.message}. User: ${to}, Password: ${password}`);
+    return { sent: false, reason: error.message };
+  }
+};
+
+const sendAdminNotification = async ({ enabled, subject, title, rows = [] }) => {
+  if (!enabled) return { sent: false, reason: 'Notification disabled' };
+
+  try {
+    const settings = await getSettings();
+    const to = settings.siteEmail || settings.mailFromEmail;
+    if (!to) return { sent: false, reason: 'Admin email not configured' };
+
+    const transporter = createTransportFromSettings(settings);
+    const htmlRows = rows
+      .filter(row => row?.label)
+      .map(row => `<tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;"><strong>${escapeHtml(row.label)}</strong></td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${escapeHtml(row.value || '-')}</td></tr>`)
+      .join('');
+
+    await transporter.sendMail({
+      from: getMailFrom(settings),
+      to,
+      subject,
+      html: `
+        <div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;">
+          <h2 style="margin:0 0 12px;">${escapeHtml(title)}</h2>
+          <table cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;border-collapse:collapse;min-width:360px;">${htmlRows}</table>
+        </div>
+      `
+    });
+
+    return { sent: true };
+  } catch (error) {
+    console.log(`Admin notification skipped. ${error.message}`);
+    return { sent: false, reason: error.message };
+  }
+};
+
+module.exports = {
+  buildUserWelcomeEmail,
+  createTransportFromSettings,
+  sendUserWelcomeEmail,
+  sendAdminNotification
+};

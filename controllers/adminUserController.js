@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Role = require('../models/Role');
 const { sendUserWelcomeEmail } = require('../utils/mail');
+const { getSettings } = require('../utils/settings');
 const {
   validateMobileNumber,
   generatePasswordFromNameAndPhone,
@@ -62,6 +63,7 @@ exports.createAdminUser = async (req, res) => {
 
     const role = await Role.findOne({ _id: roleRef, status: 'active', isDeleted: { $ne: true } });
     if (!role) return res.status(400).json({ message: 'Please select a valid active role' });
+    const settings = await getSettings();
 
     const userExists = await User.findOne({ email });
     if (userExists) return res.status(400).json({ message: 'User with this email already exists' });
@@ -75,7 +77,7 @@ exports.createAdminUser = async (req, res) => {
 
     let finalPassword = password;
     if (accountMethod === 'manual') {
-      if (!password || password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' });
+      if (!password || password.length < settings.minPassLen) return res.status(400).json({ message: `Password must be at least ${settings.minPassLen} characters` });
       if (password !== confirmPassword) return res.status(400).json({ message: 'Password and confirm password do not match' });
     } else {
       finalPassword = generatePasswordFromNameAndPhone(`${firstName}${lastName}`, normalizedPhone);
@@ -125,6 +127,7 @@ exports.updateAdminUser = async (req, res) => {
 
     const role = await Role.findOne({ _id: roleRef, isDeleted: { $ne: true } });
     if (!role) return res.status(400).json({ message: 'Please select a valid role' });
+    const settings = await getSettings();
 
     const usernameExists = await User.findOne({ username, _id: { $ne: user._id } });
     if (usernameExists) return res.status(400).json({ message: 'Username already exists' });
@@ -145,7 +148,7 @@ exports.updateAdminUser = async (req, res) => {
     user.ip = req.clientIp || '127.0.0.1';
 
     if (password) {
-      if (password.length < 8) return res.status(400).json({ message: 'Password must be at least 8 characters' });
+      if (password.length < settings.minPassLen) return res.status(400).json({ message: `Password must be at least ${settings.minPassLen} characters` });
       if (password !== confirmPassword) return res.status(400).json({ message: 'Password and confirm password do not match' });
       user.password = password;
     }

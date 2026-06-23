@@ -1,11 +1,13 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const { allPermissions } = require('../utils/permissions');
+const { getSettings } = require('../utils/settings');
+const { sendAdminNotification } = require('../utils/mail');
 
 // Helper to generate JWT token
-const generateToken = (id) => {
+const generateToken = (id, expiresIn = '30d') => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123', {
-    expiresIn: '30d'
+    expiresIn
   });
 };
 
@@ -15,9 +17,18 @@ const generateToken = (id) => {
 exports.register = async (req, res) => {
   try {
     const { email, password, role } = req.body;
+    const settings = await getSettings();
+
+    if (!settings.userRegistration) {
+      return res.status(403).json({ message: 'New user registration is currently disabled.' });
+    }
 
     if (!email || !password || !role) {
       return res.status(400).json({ message: 'Please provide email, password and role' });
+    }
+
+    if (password.length < settings.minPassLen) {
+      return res.status(400).json({ message: `Password must be at least ${settings.minPassLen} characters` });
     }
 
     if (role === 'Admin') {
@@ -41,11 +52,22 @@ exports.register = async (req, res) => {
       status: 'active'
     });
 
+    await sendAdminNotification({
+      enabled: role === 'Employer' ? settings.notifNewEmp : settings.notifNewApp,
+      subject: `New ${role} registration`,
+      title: `New ${role} Registration`,
+      rows: [
+        { label: 'Email', value: email },
+        { label: 'Role', value: role },
+        { label: 'Status', value: user.status }
+      ]
+    });
+
     res.status(201).json({
       _id: user._id,
       email: user.email,
       role: user.role,
-      token: generateToken(user._id)
+      token: generateToken(user._id, settings.sessionTimeout ? '60m' : '30d')
     });
   } catch (error) {
     console.error('Register Error:', error);
@@ -59,6 +81,7 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const settings = await getSettings();
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Please provide email and password' });
@@ -73,12 +96,36 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: 'User account is inactive' });
     }
 
+    if (user.lockUntil && user.lockUntil > new Date()) {
+      return res.status(423).json({ message: `Account is locked. Try again after ${user.lockUntil.toLocaleString()}.` });
+    }
+
+    if (user.lockUntil && user.lockUntil <= new Date()) {
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
+    }
+
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+      if (user.failedLoginAttempts >= settings.maxLoginAttempts) {
+        user.lockUntil = new Date(Date.now() + settings.lockoutDuration * 60 * 1000);
+      }
+      await user.save();
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
+    if (settings.passExpiry > 0 && user.passwordChangedAt) {
+      const ageMs = Date.now() - new Date(user.passwordChangedAt).getTime();
+      const expiryMs = settings.passExpiry * 24 * 60 * 60 * 1000;
+      if (ageMs > expiryMs) {
+        return res.status(403).json({ message: 'Your password has expired. Please contact admin to reset it.' });
+      }
+    }
+
     user.lastLogin = new Date();
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
     await user.save();
 
     const rolePermissions = user.role === 'Admin'
@@ -96,7 +143,7 @@ exports.login = async (req, res) => {
       roleName: user.roleRef?.name || user.role,
       accountType: user.accountType,
       permissions: rolePermissions,
-      token: generateToken(user._id)
+      token: generateToken(user._id, settings.sessionTimeout ? '60m' : '30d')
     });
   } catch (error) {
     console.error('Login Error:', error);
@@ -115,8 +162,13 @@ exports.seedAdmin = async (req, res) => {
     }
 
     const { email, password } = req.body;
+    const settings = await getSettings();
     if (!email || !password) {
       return res.status(400).json({ message: 'Please provide admin email and password' });
+    }
+
+    if (password.length < settings.minPassLen) {
+      return res.status(400).json({ message: `Password must be at least ${settings.minPassLen} characters` });
     }
 
     const admin = await User.create({
@@ -131,7 +183,7 @@ exports.seedAdmin = async (req, res) => {
       message: 'Initial Admin seeded successfully',
       email: admin.email,
       role: admin.role,
-      token: generateToken(admin._id)
+      token: generateToken(admin._id, settings.sessionTimeout ? '60m' : '30d')
     });
   } catch (error) {
     console.error('Seed Admin Error:', error);
@@ -145,8 +197,13 @@ exports.seedAdmin = async (req, res) => {
 exports.createAdmin = async (req, res) => {
   try {
     const { email, password } = req.body;
+    const settings = await getSettings();
     if (!email || !password) {
       return res.status(400).json({ message: 'Please provide email and password' });
+    }
+
+    if (password.length < settings.minPassLen) {
+      return res.status(400).json({ message: `Password must be at least ${settings.minPassLen} characters` });
     }
 
     const userExists = await User.findOne({ email });

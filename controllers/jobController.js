@@ -1,4 +1,6 @@
 const Job = require('../models/Job');
+const { getSettings } = require('../utils/settings');
+const { sendAdminNotification } = require('../utils/mail');
 
 exports.getJobs = async (req, res) => {
   try {
@@ -76,6 +78,19 @@ exports.createJob = async (req, res) => {
     });
 
     await job.save();
+    const settings = await getSettings();
+    await sendAdminNotification({
+      enabled: settings.notifNewJob,
+      subject: `New job posted: ${jobTitle}`,
+      title: 'New Job Posting',
+      rows: [
+        { label: 'Job Title', value: jobTitle },
+        { label: 'Company', value: companyName },
+        { label: 'Email', value: email },
+        { label: 'Phone', value: phone },
+        { label: 'Status', value: job.status }
+      ]
+    });
     res.status(201).json(job);
   } catch (error) {
     res.status(400).json({ message: error.message });

@@ -1,6 +1,8 @@
 const Employer = require('../models/Employer');
 const User = require('../models/User');
 const { validateMobileNumber, findDuplicateMobile } = require('../utils/userCredentials');
+const { getSettings } = require('../utils/settings');
+const { sendAdminNotification } = require('../utils/mail');
 
 exports.getEmployers = async (req, res) => {
   try {
@@ -87,6 +89,19 @@ exports.createEmployer = async (req, res) => {
     });
 
     await employer.save();
+    const settings = await getSettings();
+    await sendAdminNotification({
+      enabled: settings.notifNewEmp,
+      subject: `New employer registered: ${companyName}`,
+      title: 'New Employer Registration',
+      rows: [
+        { label: 'Company', value: companyName },
+        { label: 'Contact Person', value: contactPerson },
+        { label: 'Email', value: email },
+        { label: 'Phone', value: normalizedPhone },
+        { label: 'Status', value: employer.status }
+      ]
+    });
     res.status(201).json(employer);
   } catch (error) {
     res.status(400).json({ message: error.message });

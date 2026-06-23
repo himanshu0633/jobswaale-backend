@@ -56,6 +56,18 @@ const UserSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  passwordChangedAt: {
+    type: Date,
+    default: Date.now
+  },
+  failedLoginAttempts: {
+    type: Number,
+    default: 0
+  },
+  lockUntil: {
+    type: Date,
+    default: null
+  },
   ip: {
     type: String,
     default: ''
@@ -82,6 +94,7 @@ UserSchema.pre('save', async function() {
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
+    this.passwordChangedAt = new Date();
   } catch (err) {
     throw err;
   }

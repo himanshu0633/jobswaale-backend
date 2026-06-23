@@ -1,6 +1,8 @@
 const Jobseeker = require('../models/Jobseeker');
 const User = require('../models/User');
 const { validateMobileNumber, findDuplicateMobile } = require('../utils/userCredentials');
+const { getSettings } = require('../utils/settings');
+const { sendAdminNotification } = require('../utils/mail');
 
 exports.getJobseekers = async (req, res) => {
   try {
@@ -98,6 +100,19 @@ exports.createJobseeker = async (req, res) => {
     });
 
     await jobseeker.save();
+    const settings = await getSettings();
+    await sendAdminNotification({
+      enabled: settings.notifNewApp,
+      subject: `New jobseeker registered: ${name}`,
+      title: 'New Jobseeker Registration',
+      rows: [
+        { label: 'Name', value: name },
+        { label: 'Email', value: email },
+        { label: 'Phone', value: normalizedPhone },
+        { label: 'Experience', value: experience },
+        { label: 'Status', value: jobseeker.status }
+      ]
+    });
     res.status(201).json(jobseeker);
   } catch (error) {
     res.status(400).json({ message: error.message });

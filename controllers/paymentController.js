@@ -3,6 +3,8 @@ const Employer = require('../models/Employer');
 const Jobseeker = require('../models/Jobseeker');
 const Plan = require('../models/Plan');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { getSettings } = require('../utils/settings');
+const { sendAdminNotification } = require('../utils/mail');
 
 const getNextPaymentId = async () => {
   const lastPayment = await Payment.findOne({ paymentId: /^PAY-\d+$/ })
@@ -229,6 +231,20 @@ exports.createPayment = async (req, res) => {
     }));
 
     await newPayment.save();
+    const settings = await getSettings();
+    await sendAdminNotification({
+      enabled: settings.notifPayment,
+      subject: `Payment ${newPayment.paymentStatus}: ${newPayment.paymentId}`,
+      title: 'Payment Received',
+      rows: [
+        { label: 'Payment ID', value: newPayment.paymentId },
+        { label: 'Customer', value: newPayment.customerName },
+        { label: 'Email', value: newPayment.email },
+        { label: 'Plan', value: newPayment.planName },
+        { label: 'Amount', value: `${settings.currency} ${newPayment.paidAmount}` },
+        { label: 'Status', value: newPayment.paymentStatus }
+      ]
+    });
     res.status(201).json(newPayment);
   } catch (error) {
     res.status(400).json({ message: error.message });

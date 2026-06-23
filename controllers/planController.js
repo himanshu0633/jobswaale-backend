@@ -1,12 +1,20 @@
 const Plan = require('../models/Plan');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
 const { validateWholeNumber, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
+const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
 
 exports.getPlans = async (req, res) => {
   try {
-    const { page, limit = 10, search = '', paginate } = req.query;
+    const { page, limit = 10, search = '', paginate, category } = req.query;
+
+    if (category === 'Employer') {
+      await seedEmployerPlansIfEmpty();
+    }
 
     const filter = { isDeleted: { $ne: true } };
+    if (category) {
+      filter.category = category;
+    }
     if (paginate === 'true' || page !== undefined) {
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 10;
@@ -50,13 +58,34 @@ exports.getPlans = async (req, res) => {
 
 exports.createPlan = async (req, res) => {
   try {
-    const { category, planName, cost, planValidity, planType, displayOrder, startingDate, endDate, features, status } = req.body;
+    const {
+      category,
+      planName,
+      planSubtitle,
+      cost,
+      planValidity,
+      planType,
+      displayOrder,
+      startingDate,
+      endDate,
+      features,
+      status,
+      unlockCount,
+      freeJobPosts,
+      showBadge,
+      badge,
+      employerFeatures,
+      offerEnabled,
+      offerTitle,
+      offerDescription
+    } = req.body;
     const normalizedPlanType = planType || 'Free';
+    const normalizedCategory = category || 'Jobseeker';
     if (!planName || !planValidity) {
       return res.status(400).json({ message: 'planName and planValidity are required' });
     }
     const cleanPlanName = planName.trim();
-    const nameExists = await Plan.findOne(caseInsensitiveExactFilter('planName', cleanPlanName));
+    const nameExists = await Plan.findOne(caseInsensitiveExactFilter('planName', cleanPlanName, { category: normalizedCategory, isDeleted: { $ne: true } }));
     if (nameExists) {
       return res.status(400).json({ message: 'Plan with this Name already exists' });
     }
@@ -67,12 +96,21 @@ exports.createPlan = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     const newPlan = new Plan(addAuditOnCreate(req, {
-      category: category || 'Jobseeker',
+      category: normalizedCategory,
       planName: cleanPlanName,
+      planSubtitle: String(planSubtitle || '').trim(),
       cost: normalizedPlanType === 'Paid' ? Number(cost) : 0,
       planValidity,
       planType: normalizedPlanType,
       displayOrder: Number(displayOrder) || 0,
+      unlockCount: String(unlockCount || '').trim(),
+      freeJobPosts: Number(freeJobPosts) || 0,
+      showBadge: Boolean(showBadge),
+      badge: String(badge || '').trim(),
+      employerFeatures: Array.isArray(employerFeatures) ? employerFeatures.map(item => String(item || '').trim()).filter(Boolean) : [],
+      offerEnabled: Boolean(offerEnabled),
+      offerTitle: String(offerTitle || '').trim(),
+      offerDescription: String(offerDescription || '').trim(),
       startingDate,
       endDate,
       features: features || [],
@@ -90,11 +128,32 @@ exports.createPlan = async (req, res) => {
 exports.updatePlan = async (req, res) => {
   try {
     const { uid } = req.params;
-    const { category, planName, cost, planValidity, planType, displayOrder, startingDate, endDate, features, status } = req.body;
+    const {
+      category,
+      planName,
+      planSubtitle,
+      cost,
+      planValidity,
+      planType,
+      displayOrder,
+      startingDate,
+      endDate,
+      features,
+      status,
+      unlockCount,
+      freeJobPosts,
+      showBadge,
+      badge,
+      employerFeatures,
+      offerEnabled,
+      offerTitle,
+      offerDescription
+    } = req.body;
     const normalizedPlanType = planType || 'Free';
+    const normalizedCategory = category || 'Jobseeker';
     const cleanPlanName = planName ? planName.trim() : planName;
     if (cleanPlanName) {
-      const duplicate = await Plan.findOne(caseInsensitiveExactFilter('planName', cleanPlanName, { _id: { $ne: uid } }));
+      const duplicate = await Plan.findOne(caseInsensitiveExactFilter('planName', cleanPlanName, { _id: { $ne: uid }, category: normalizedCategory, isDeleted: { $ne: true } }));
       if (duplicate) {
         return res.status(400).json({ message: 'Plan with this Name already exists' });
       }
@@ -108,12 +167,21 @@ exports.updatePlan = async (req, res) => {
     const updated = await Plan.findByIdAndUpdate(
       uid,
       addAuditOnUpdate(req, {
-        category: category || 'Jobseeker',
+        category: normalizedCategory,
         planName: cleanPlanName,
+        planSubtitle: String(planSubtitle || '').trim(),
         cost: normalizedPlanType === 'Paid' ? Number(cost) : 0,
         planValidity,
         planType: normalizedPlanType,
         displayOrder: Number(displayOrder) || 0,
+        unlockCount: String(unlockCount || '').trim(),
+        freeJobPosts: Number(freeJobPosts) || 0,
+        showBadge: Boolean(showBadge),
+        badge: String(badge || '').trim(),
+        employerFeatures: Array.isArray(employerFeatures) ? employerFeatures.map(item => String(item || '').trim()).filter(Boolean) : [],
+        offerEnabled: Boolean(offerEnabled),
+        offerTitle: String(offerTitle || '').trim(),
+        offerDescription: String(offerDescription || '').trim(),
         startingDate,
         endDate,
         features: features || [],
