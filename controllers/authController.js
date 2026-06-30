@@ -17,7 +17,19 @@ const generateToken = (id, expiresIn = '30d') => {
 // @access  Public
 exports.register = async (req, res) => {
   try {
-    const { email, password, role } = req.body;
+    const {
+      email,
+      password,
+      role,
+      fullName = '',
+      phone = '',
+      workStatus = '',
+      updatesConsent = true,
+      companyName = '',
+      designation = '',
+      companyType = '',
+      companySize = ''
+    } = req.body;
     const settings = await getSettings();
 
     if (!settings.userRegistration) {
@@ -40,12 +52,29 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: 'Invalid role selection' });
     }
 
+    if (role === 'Employer' && (!companyName || !designation || !companyType || !companySize)) {
+      return res.status(400).json({ message: 'Please provide complete company details' });
+    }
+
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
 
+    const nameParts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts.shift() || '';
+    const lastName = nameParts.join(' ');
+
     const user = await User.create({
+      firstName,
+      lastName,
+      phone: String(phone || '').trim(),
+      workStatus: role === 'Jobseeker' ? String(workStatus || '').trim() : '',
+      updatesConsent: updatesConsent !== false,
+      companyName: role === 'Employer' ? String(companyName || '').trim() : '',
+      designation: role === 'Employer' ? String(designation || '').trim() : '',
+      companyType: role === 'Employer' ? String(companyType || '').trim() : '',
+      companySize: role === 'Employer' ? String(companySize || '').trim() : '',
       email,
       password,
       role,
@@ -58,7 +87,17 @@ exports.register = async (req, res) => {
       subject: `New ${role} registration`,
       title: `New ${role} Registration`,
       rows: [
+        { label: 'Name', value: String(fullName || '').trim() || '-' },
         { label: 'Email', value: email },
+        { label: 'Phone', value: String(phone || '').trim() || '-' },
+        ...(role === 'Employer' ? [
+          { label: 'Company', value: String(companyName || '').trim() || '-' },
+          { label: 'Designation', value: String(designation || '').trim() || '-' },
+          { label: 'Company Type', value: String(companyType || '').trim() || '-' },
+          { label: 'Company Size', value: String(companySize || '').trim() || '-' }
+        ] : [
+          { label: 'Work Status', value: String(workStatus || '').trim() || '-' }
+        ]),
         { label: 'Role', value: role },
         { label: 'Status', value: user.status }
       ]
@@ -66,6 +105,14 @@ exports.register = async (req, res) => {
 
     res.status(201).json({
       _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: user.phone,
+      workStatus: user.workStatus,
+      companyName: user.companyName,
+      designation: user.designation,
+      companyType: user.companyType,
+      companySize: user.companySize,
       email: user.email,
       role: user.role,
       token: generateToken(user._id, settings.sessionTimeout ? '60m' : '30d')
@@ -116,7 +163,7 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
-    if (!isSuperAdminAccount(user)) {
+    if (req.superAdminOnly && !isSuperAdminAccount(user)) {
       return res.status(403).json({ message: 'Only super admin can access the admin portal' });
     }
 

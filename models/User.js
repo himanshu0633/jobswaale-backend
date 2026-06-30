@@ -22,6 +22,35 @@ const UserSchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  companyName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  designation: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  companyType: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  companySize: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  workStatus: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  updatesConsent: {
+    type: Boolean,
+    default: true
+  },
   email: {
     type: String,
     required: true,
