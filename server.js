@@ -37,6 +37,7 @@ app.use('/api/cms', require('./routes/pageRoutes'));
 app.use('/api/cms', require('./routes/blogCategoryRoutes'));
 app.use('/api/cms', require('./routes/blogRoutes'));
 app.use('/api/employers', require('./routes/employerRoutes'));
+app.use('/api/employer', require('./routes/employerPortalRoutes'));
 app.use('/api/jobseekers', require('./routes/jobseekerRoutes'));
 app.use('/api/jobs', require('./routes/jobRoutes'));
 app.use('/api/payments', require('./routes/paymentRoutes'));

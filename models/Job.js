@@ -26,12 +26,29 @@ const JobSchema = new mongoose.Schema({
   },
   workMode: {
     type: String,
-    enum: ['Onsite', 'Remote'],
+    enum: ['Onsite', 'Remote', 'Office', 'Work from Home', 'Hybrid'],
     default: 'Onsite'
   },
+  jobLocations: [{
+    type: String,
+    trim: true
+  }],
   description: {
     type: String,
     required: true
+  },
+  jobSummary: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  detailedDescription: {
+    type: String,
+    default: ''
+  },
+  responsibilities: {
+    type: String,
+    default: ''
   },
   qualification: {
     type: mongoose.Schema.Types.ObjectId,
@@ -41,12 +58,76 @@ const JobSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  requiredExperience: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   salary: {
     type: String
+  },
+  minSalary: {
+    type: Number,
+    default: null
+  },
+  maxSalary: {
+    type: Number,
+    default: null
+  },
+  salaryUnit: {
+    type: String,
+    trim: true,
+    default: ''
   },
   salaryNegotiable: {
     type: Boolean,
     default: false
+  },
+  noticePeriod: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  joiningDate: {
+    type: Date
+  },
+  shiftTiming: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  jobExpiry: {
+    type: Date
+  },
+  benefits: {
+    type: String,
+    default: ''
+  },
+  aboutCompany: {
+    type: String,
+    default: ''
+  },
+  skills: [{
+    type: String,
+    trim: true
+  }],
+  languages: [{
+    type: String,
+    trim: true
+  }],
+  candidateLocationPreference: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  screeningQuestions: {
+    type: String,
+    default: ''
+  },
+  publishStatus: {
+    type: String,
+    enum: ['publish', 'draft', 'scheduled'],
+    default: 'publish'
   },
   country: {
     type: String,

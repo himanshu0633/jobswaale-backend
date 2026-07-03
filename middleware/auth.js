@@ -51,4 +51,15 @@ const authorizeAdminPortal = (req, res, next) => {
   next();
 };
 
-module.exports = { protect, authorize, authorizeAdminPortal, isSuperAdminAccount };
+const authorizeEmployerPortal = (req, res, next) => {
+  const role = String(req.user?.role || '').trim().toLowerCase();
+  const accountType = String(req.user?.accountType || '').trim().toLowerCase();
+
+  if (role !== 'employer' && accountType !== 'employer') {
+    return res.status(403).json({ message: 'Employer access is required' });
+  }
+
+  next();
+};
+
+module.exports = { protect, authorize, authorizeAdminPortal, authorizeEmployerPortal, isSuperAdminAccount };

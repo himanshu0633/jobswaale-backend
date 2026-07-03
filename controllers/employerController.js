@@ -11,8 +11,58 @@ exports.getEmployers = async (req, res) => {
       .populate('industryType')
       .populate('currentPlan')
       .populate('login', 'email')
-      .populate('updatedLogin', 'email');
-    res.json(list);
+      .populate('updatedLogin', 'email')
+      .lean();
+
+    const profileUserIds = new Set(list.map((item) => String(item.userId?._id || item.userId)).filter(Boolean));
+    const publicUsersWithoutProfile = await User.find({
+      isDeleted: { $ne: true },
+      $or: [{ role: 'Employer' }, { accountType: 'employer' }]
+    }).select('_id firstName lastName email phone companyName designation companyType companySize updatesConsent status createDate updateDate').lean();
+
+    const pendingProfiles = publicUsersWithoutProfile
+      .filter((user) => !profileUserIds.has(String(user._id)))
+      .map((user) => {
+        const contactPerson = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        return {
+          _id: user._id,
+          userId: {
+            _id: user._id,
+            email: user.email,
+            role: 'Employer',
+            status: user.status
+          },
+          companyName: user.companyName || user.email || 'Employer',
+          contactPerson: contactPerson || user.designation || '',
+          phone: user.phone || '',
+          designation: user.designation || '',
+          companyType: user.companyType || '',
+          companySize: user.companySize || '',
+          updatesConsent: user.updatesConsent,
+          registeredOn: user.createDate || user.updateDate,
+          source: 'Public Registration',
+          industryType: null,
+          website: '',
+          description: [user.companyType, user.companySize].filter(Boolean).join(' • '),
+          country: '',
+          state: '',
+          district: '',
+          city: '',
+          address: '',
+          pinCode: '',
+          currentPlan: null,
+          planValidity: null,
+          logo: '',
+          status: user.status === 'inactive' ? 'pending' : 'active',
+          isVerified: false,
+          blacklistReason: '',
+          createDate: user.createDate,
+          updateDate: user.updateDate,
+          profileIncomplete: true
+        };
+      });
+
+    res.json([...list, ...pendingProfiles]);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -84,6 +134,7 @@ exports.createEmployer = async (req, res) => {
       planValidity: planValidity || null,
       logo,
       status: status || 'active',
+      isVerified: false,
       ip: req.clientIp || '127.0.0.1',
       login: req.user ? req.user._id : user._id
     });
@@ -174,6 +225,7 @@ exports.updateEmployer = async (req, res) => {
         planValidity: planValidity || null,
         logo,
         status: status || employer.status,
+        isVerified: status === 'blacklist' ? false : employer.isVerified,
         blacklistReason: status === 'blacklist' ? (blacklistReason || '') : '',
         ip: req.clientIp || '127.0.0.1',
         updatedLogin: req.user ? req.user._id : null
@@ -219,12 +271,79 @@ exports.updateEmployerStatus = async (req, res) => {
     });
 
     employer.status = status;
+    if (status === 'blacklist') {
+      employer.isVerified = false;
+    }
     employer.blacklistReason = status === 'blacklist' ? (blacklistReason || '') : '';
     employer.updatedLogin = req.user ? req.user._id : null;
     employer.ip = req.clientIp || '127.0.0.1';
 
     await employer.save();
     res.json(employer);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+exports.verifyEmployer = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const employer = await Employer.findById(id);
+    if (!employer) {
+      return res.status(404).json({ message: 'Employer profile not found' });
+    }
+
+    await User.findByIdAndUpdate(employer.userId, {
+      status: 'active',
+      updatedLogin: req.user ? req.user._id : null,
+      ip: req.clientIp || '127.0.0.1'
+    });
+
+    employer.status = 'active';
+    employer.isVerified = true;
+    employer.blacklistReason = '';
+    employer.updatedLogin = req.user ? req.user._id : null;
+    employer.ip = req.clientIp || '127.0.0.1';
+
+    await employer.save();
+    const populated = await Employer.findById(employer._id)
+      .populate('userId', 'email role status')
+      .populate('industryType')
+      .populate('currentPlan')
+      .populate('login', 'email')
+      .populate('updatedLogin', 'email')
+      .lean();
+
+    res.json(populated);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+exports.unverifyEmployer = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const employer = await Employer.findById(id);
+    if (!employer) {
+      return res.status(404).json({ message: 'Employer profile not found' });
+    }
+
+    employer.isVerified = false;
+    employer.updatedLogin = req.user ? req.user._id : null;
+    employer.ip = req.clientIp || '127.0.0.1';
+
+    await employer.save();
+    const populated = await Employer.findById(employer._id)
+      .populate('userId', 'email role status')
+      .populate('industryType')
+      .populate('currentPlan')
+      .populate('login', 'email')
+      .populate('updatedLogin', 'email')
+      .lean();
+
+    res.json(populated);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }

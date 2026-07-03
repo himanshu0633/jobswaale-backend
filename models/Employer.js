@@ -72,6 +72,10 @@ const EmployerSchema = new mongoose.Schema({
     enum: ['active', 'pending', 'blacklist'],
     default: 'active'
   },
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
   blacklistReason: {
     type: String,
     default: ''

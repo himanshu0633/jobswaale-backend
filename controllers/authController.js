@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const Employer = require('../models/Employer');
 const jwt = require('jsonwebtoken');
 const { allPermissions } = require('../utils/permissions');
 const { getSettings } = require('../utils/settings');
@@ -10,6 +11,14 @@ const generateToken = (id, expiresIn = '30d') => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123', {
     expiresIn
   });
+};
+
+const getBlacklistedEmployer = async (userId) => {
+  return Employer.findOne({
+    userId,
+    isDeleted: { $ne: true },
+    status: 'blacklist'
+  }).select('blacklistReason companyName').lean();
 };
 
 // @desc    Register a new user (Jobseeker/Employer only)
@@ -138,6 +147,21 @@ exports.login = async (req, res) => {
     const user = await User.findOne({ email }).populate('roleRef');
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    if (user.accountType === 'employer' || user.role === 'Employer') {
+      const blacklistedEmployer = await getBlacklistedEmployer(user._id);
+      if (blacklistedEmployer) {
+        const reason = String(blacklistedEmployer.blacklistReason || '').trim();
+        return res.status(403).json({
+          message: reason
+            ? `Your employer account has been blacklisted. Reason: ${reason}`
+            : 'Your employer account has been blacklisted. Please contact admin.',
+          accountStatus: 'blacklisted',
+          blacklistReason: reason,
+          companyName: blacklistedEmployer.companyName || ''
+        });
+      }
     }
 
     if (user.status !== 'active') {

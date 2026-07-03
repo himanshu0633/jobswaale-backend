@@ -14,8 +14,59 @@ exports.getJobseekers = async (req, res) => {
       .populate('jobType')
       .populate('currentPlan')
       .populate('login', 'email')
-      .populate('updatedLogin', 'email');
-    res.json(list);
+      .populate('updatedLogin', 'email')
+      .lean();
+
+    const profileUserIds = new Set(list.map((item) => String(item.userId?._id || item.userId)).filter(Boolean));
+    const publicUsersWithoutProfile = await User.find({
+      isDeleted: { $ne: true },
+      $or: [{ role: 'Jobseeker' }, { accountType: 'jobseeker' }]
+    }).select('_id firstName lastName email phone workStatus updatesConsent status createDate updateDate').lean();
+
+    const pendingProfiles = publicUsersWithoutProfile
+      .filter((user) => !profileUserIds.has(String(user._id)))
+      .map((user) => {
+        const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Jobseeker';
+        return {
+          _id: user._id,
+          userId: {
+            _id: user._id,
+            email: user.email,
+            role: 'Jobseeker',
+            status: user.status
+          },
+          name: fullName,
+          phone: user.phone || '',
+          workStatus: user.workStatus || '',
+          updatesConsent: user.updatesConsent,
+          registeredOn: user.createDate || user.updateDate,
+          source: 'Public Registration',
+          gender: '',
+          qualification: null,
+          industryType: null,
+          jobCategory: null,
+          jobType: null,
+          experience: user.workStatus || 'Profile pending',
+          expectedSalary: '',
+          preferredLocation: '',
+          country: '',
+          state: '',
+          district: '',
+          city: '',
+          address: '',
+          pinCode: '',
+          currentPlan: null,
+          planValidity: null,
+          resume: '',
+          status: user.status === 'inactive' ? 'pending' : 'active',
+          blacklistReason: '',
+          createDate: user.createDate,
+          updateDate: user.updateDate,
+          profileIncomplete: true
+        };
+      });
+
+    res.json([...list, ...pendingProfiles]);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
