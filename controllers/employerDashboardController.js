@@ -63,86 +63,15 @@ const formatDisplayDate = (value) => {
   return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value));
 };
 
-const getApplicationStatus = (index) => ['Applied', 'Shortlisted', 'Interview', 'Reviewed', 'Rejected', 'Offered'][index % 6];
-
-const getMatchScore = (candidate, job, index) => {
-  const candidateText = [
-    candidate.jobCategory?.categoryName,
-    candidate.industryType?.name,
-    candidate.experience,
-    candidate.city
-  ].filter(Boolean).join(' ').toLowerCase();
-  const jobText = [
-    job?.jobTitle,
-    job?.jobCategory?.categoryName,
-    job?.experience,
-    job?.requiredExperience,
-    job?.city,
-    ...(job?.skills || [])
-  ].filter(Boolean).join(' ').toLowerCase();
-  let score = 68 + ((index * 7) % 25);
-  if (candidate.jobCategory && String(candidate.jobCategory?._id || candidate.jobCategory) === String(job?.jobCategory?._id || job?.jobCategory)) score += 8;
-  if (candidateText && jobText && candidateText.split(/\s+/).some(word => word.length > 3 && jobText.includes(word))) score += 6;
-  return Math.min(score, 98);
-};
-
 const ensureApplicationsExist = async (userId) => {
   try {
     const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
       .populate('jobType', 'jobType')
       .populate('jobCategory', 'categoryName')
       .lean();
-    if (!jobs.length) return [];
-
-    const jobIds = jobs.map(j => j._id);
-    const existingCount = await Application.countDocuments({ job: { $in: jobIds } });
-
-    if (existingCount > 0) {
-      return jobs;
-    }
-
-    const candidates = await Jobseeker.find({ isDeleted: { $ne: true }, status: { $ne: 'blacklist' } })
-      .populate('userId', 'email')
-      .populate('qualification', 'name')
-      .populate('jobCategory', 'categoryName')
-      .lean();
-
-    if (!candidates.length) return jobs;
-
-    const applicationsToInsert = candidates.map((candidate, index) => {
-      const job = jobs[index % jobs.length];
-      const status = getApplicationStatus(index);
-      const appliedDate = candidate.createDate || candidate.updateDate || new Date();
-      
-      let shortlistedDate = null;
-      if (['Shortlisted', 'Interview', 'Offered'].includes(status)) {
-        shortlistedDate = addDays(appliedDate, 2);
-      }
-
-      return {
-        job: job._id,
-        candidate: candidate._id,
-        status,
-        matchScore: getMatchScore(candidate, job, index),
-        appliedDate,
-        shortlistedDate,
-        interviewDetails: status === 'Interview' ? {
-          date: addDays(appliedDate, 5),
-          time: '14:00',
-          type: 'Video Call',
-          locationOrLink: 'https://zoom.us/j/mock-interview-meeting',
-          notes: 'Technical discussion and evaluation.'
-        } : undefined
-      };
-    });
-
-    if (applicationsToInsert.length) {
-      await Application.insertMany(applicationsToInsert);
-    }
-
     return jobs;
   } catch (err) {
-    console.error('Error seeding applications:', err);
+    console.error('Error loading employer jobs:', err);
     return [];
   }
 };
@@ -490,6 +419,419 @@ exports.getEmployerApplications = async (req, res) => {
       },
       applications: items,
       pagination
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getEmployerInterviews = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const query = req.query || {};
+
+    const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
+      .select('_id jobTitle jobType contactPerson')
+      .populate('jobType', 'jobType')
+      .lean();
+    const jobIds = jobs.map(job => job._id);
+
+    if (!jobIds.length) {
+      return res.json({
+        stats: { total: 0, scheduled: 0, completed: 0, rescheduled: 0, cancelled: 0 },
+        filters: { jobTitles: [], types: [] },
+        interviews: [],
+        pagination: { page: 1, limit: Number(query.limit) || 10, total: 0, totalPages: 1 }
+      });
+    }
+
+    const dbApps = await Application.find({ job: { $in: jobIds }, status: 'Interview' })
+      .populate({
+        path: 'job',
+        populate: [
+          { path: 'jobType', select: 'jobType' },
+          { path: 'jobCategory', select: 'categoryName' }
+        ]
+      })
+      .populate({
+        path: 'candidate',
+        populate: [
+          { path: 'userId', select: 'email' },
+          { path: 'jobCategory', select: 'categoryName' }
+        ]
+      })
+      .lean();
+
+    const normalizeInterviewType = (type) => {
+      if (type === 'Phone Call') return 'Telephonic';
+      return type || 'Other';
+    };
+
+    const interviews = dbApps.map((app, index) => {
+      const candidate = app.candidate;
+      const job = app.job;
+      if (!candidate || !job) return null;
+
+      const details = app.interviewDetails || {};
+      const interviewDate = details.date || app.updateDate || app.appliedDate;
+      const interviewStatus = details.status || 'Scheduled';
+
+      return {
+        id: app._id,
+        applicationId: app._id,
+        candidateId: candidate._id,
+        jobId: job._id,
+        name: candidate.name,
+        email: candidate.userId?.email || '',
+        phone: candidate.phone || '',
+        location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
+        jobTitle: job.jobTitle || 'Open Position',
+        jobType: job.jobType?.jobType || 'Full Time',
+        type: normalizeInterviewType(details.type),
+        interviewDate: interviewDate ? new Date(interviewDate).toISOString().slice(0, 10) : '',
+        displayDate: formatDisplayDate(interviewDate),
+        time: details.time || '',
+        interviewer: details.interviewer || job.contactPerson || req.user.firstName || req.user.companyName || 'Interviewer',
+        locationOrLink: details.locationOrLink || '',
+        notes: details.notes || '',
+        status: interviewStatus,
+        initials: getInitials(candidate.name).toUpperCase(),
+        avatarTone: ['from-rose-200 to-amber-200', 'from-blue-200 to-red-200', 'from-pink-200 to-slate-300', 'from-yellow-200 to-orange-200', 'from-amber-200 to-emerald-200', 'from-sky-200 to-slate-200', 'from-purple-200 to-pink-200'][index % 7],
+        interviewerTone: index % 2 ? 'from-orange-200 to-slate-300' : 'from-emerald-200 to-pink-200'
+      };
+    }).filter(Boolean);
+
+    const stats = interviews.reduce((acc, item) => {
+      const key = String(item.status || 'Scheduled').toLowerCase();
+      return { ...acc, total: acc.total + 1, [key]: (acc[key] || 0) + 1 };
+    }, { total: 0, scheduled: 0, completed: 0, rescheduled: 0, cancelled: 0 });
+
+    const rawSearch = String(query.search || '').trim().toLowerCase();
+    const normalizedType = query.type === 'Telephonic' ? 'Telephonic' : query.type;
+    let filtered = interviews.filter((interview) => {
+      const searchable = [
+        interview.name,
+        interview.email,
+        interview.phone,
+        interview.jobTitle,
+        interview.jobType,
+        interview.type,
+        interview.interviewer,
+        interview.status
+      ].join(' ').toLowerCase();
+
+      return (!rawSearch || searchable.includes(rawSearch))
+        && (!query.jobTitle || interview.jobTitle === query.jobTitle)
+        && (!query.status || interview.status === query.status)
+        && (!normalizedType || interview.type === normalizedType)
+        && (!query.fromDate || interview.interviewDate >= query.fromDate);
+    });
+
+    filtered.sort((a, b) => b.interviewDate.localeCompare(a.interviewDate) || String(b.time).localeCompare(String(a.time)));
+    const { items, pagination } = paginate(filtered, query.page, query.limit);
+
+    res.json({
+      stats,
+      filters: {
+        jobTitles: [...new Set(interviews.map(item => item.jobTitle).filter(Boolean))],
+        types: [...new Set(interviews.map(item => item.type).filter(Boolean))]
+      },
+      interviews: items,
+      pagination
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getEmployerSelected = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const query = req.query || {};
+
+    const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
+      .select('_id jobTitle jobType minSalary maxSalary salary salaryUnit')
+      .populate('jobType', 'jobType')
+      .lean();
+    const jobIds = jobs.map(job => job._id);
+
+    if (!jobIds.length) {
+      return res.json({
+        stats: { total: 0, offerSent: 0, offerAccepted: 0, hired: 0, offerDeclined: 0 },
+        filters: { jobTitles: [] },
+        selected: [],
+        pagination: { page: 1, limit: Number(query.limit) || 10, total: 0, totalPages: 1 }
+      });
+    }
+
+    const dbApps = await Application.find({ job: { $in: jobIds }, status: 'Offered' })
+      .populate({
+        path: 'job',
+        populate: [
+          { path: 'jobType', select: 'jobType' },
+          { path: 'jobCategory', select: 'categoryName' }
+        ]
+      })
+      .populate({
+        path: 'candidate',
+        populate: [
+          { path: 'userId', select: 'email' },
+          { path: 'jobCategory', select: 'categoryName' }
+        ]
+      })
+      .lean();
+
+    const getSalaryLpa = (app) => {
+      const detailsSalary = app.selectionDetails?.salaryOffered;
+      if (detailsSalary !== null && detailsSalary !== undefined && detailsSalary !== '') {
+        const salary = Number(detailsSalary);
+        return salary > 100 ? Number((salary / 100000).toFixed(1)) : salary;
+      }
+      const job = app.job || {};
+      if (job.maxSalary) return Number((Number(job.maxSalary) / 100000).toFixed(1));
+      if (job.minSalary) return Number((Number(job.minSalary) / 100000).toFixed(1));
+      const parsed = parseSalaryRange(job.salary || '');
+      if (parsed.max) return parsed.max > 100 ? Number((parsed.max / 100000).toFixed(1)) : parsed.max;
+      return null;
+    };
+
+    const selectedRows = dbApps.map((app, index) => {
+      const candidate = app.candidate;
+      const job = app.job;
+      if (!candidate || !job) return null;
+
+      const details = app.selectionDetails || {};
+      const selectedDate = details.selectedDate || app.updateDate || app.appliedDate;
+      const offerStatus = details.offerStatus || 'Offer Sent';
+      const salaryLpa = getSalaryLpa(app);
+
+      return {
+        id: app._id,
+        applicationId: app._id,
+        candidateId: candidate._id,
+        jobId: job._id,
+        name: candidate.name,
+        email: candidate.userId?.email || '',
+        phone: candidate.phone || '',
+        location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
+        jobTitle: job.jobTitle || 'Open Position',
+        jobType: details.employmentType || job.jobType?.jobType || 'Full Time',
+        selectionDate: selectedDate ? new Date(selectedDate).toISOString().slice(0, 10) : '',
+        displayDate: formatDisplayDate(selectedDate),
+        interviewScore: details.interviewScore ?? app.matchScore ?? 0,
+        offerStatus,
+        salaryOffered: salaryLpa,
+        salaryText: salaryLpa !== null ? `Rs. ${salaryLpa} LPA` : 'Not added',
+        joiningDate: details.joiningDate ? formatDate(details.joiningDate) : null,
+        initials: getInitials(candidate.name).toUpperCase(),
+        avatarTone: ['from-rose-200 to-amber-200', 'from-blue-200 to-red-200', 'from-pink-200 to-slate-300', 'from-yellow-200 to-orange-200', 'from-amber-200 to-emerald-200', 'from-sky-200 to-slate-200', 'from-purple-200 to-pink-200'][index % 7]
+      };
+    }).filter(Boolean);
+
+    const stats = selectedRows.reduce((acc, item) => {
+      if (item.offerStatus === 'Offer Sent') acc.offerSent += 1;
+      if (item.offerStatus === 'Offer Accepted') acc.offerAccepted += 1;
+      if (item.offerStatus === 'Hired') acc.hired += 1;
+      if (item.offerStatus === 'Offer Declined') acc.offerDeclined += 1;
+      return { ...acc, total: acc.total + 1 };
+    }, { total: 0, offerSent: 0, offerAccepted: 0, hired: 0, offerDeclined: 0 });
+
+    const rawSearch = String(query.search || '').trim().toLowerCase();
+    const minSalary = query.minSalary ? Number(query.minSalary) : null;
+    let filtered = selectedRows.filter((item) => {
+      const searchable = [
+        item.name,
+        item.email,
+        item.phone,
+        item.location,
+        item.jobTitle,
+        item.jobType,
+        item.offerStatus
+      ].join(' ').toLowerCase();
+
+      return (!rawSearch || searchable.includes(rawSearch))
+        && (!query.jobTitle || item.jobTitle === query.jobTitle)
+        && (!query.status || item.offerStatus === query.status)
+        && (!query.selectionDate || item.selectionDate >= query.selectionDate)
+        && (!minSalary || (item.salaryOffered !== null && item.salaryOffered >= minSalary));
+    });
+
+    filtered.sort((a, b) => b.selectionDate.localeCompare(a.selectionDate) || b.interviewScore - a.interviewScore);
+    const { items, pagination } = paginate(filtered, query.page, query.limit);
+
+    res.json({
+      stats,
+      filters: {
+        jobTitles: [...new Set(selectedRows.map(item => item.jobTitle).filter(Boolean))]
+      },
+      selected: items,
+      pagination
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getEmployerReports = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const query = req.query || {};
+    const now = new Date();
+    const defaultFrom = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const fromDate = query.from ? new Date(query.from) : defaultFrom;
+    const toDate = query.to ? new Date(query.to) : now;
+    toDate.setHours(23, 59, 59, 999);
+
+    const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
+      .select('_id jobTitle jobType postingDate jobExpiry status publishStatus')
+      .populate('jobType', 'jobType')
+      .lean();
+    const jobIds = jobs.map(job => job._id);
+
+    if (!jobIds.length) {
+      return res.json({
+        range: { from: formatDate(fromDate), to: formatDate(toDate), label: 'No jobs found' },
+        stats: { totalApplications: 0, shortlisted: 0, interviews: 0, offersMade: 0, hires: 0, rejectionRate: 0 },
+        monthlyOverview: [],
+        sources: [],
+        funnel: [],
+        recentActivity: [],
+        topJobs: []
+      });
+    }
+
+    const apps = await Application.find({
+      job: { $in: jobIds },
+      appliedDate: { $gte: fromDate, $lte: toDate }
+    })
+      .populate({
+        path: 'candidate',
+        populate: { path: 'userId', select: 'email' }
+      })
+      .populate('job', 'jobTitle jobType')
+      .lean();
+
+    const sourceLabel = (app) => app.source || app.candidate?.source || app.candidate?.registrationSource || app.candidate?.leadSource || 'Other';
+    const monthFormatter = new Intl.DateTimeFormat('en-IN', { month: 'short' });
+    const monthKeys = [];
+    for (let index = 5; index >= 0; index -= 1) {
+      const date = new Date(toDate.getFullYear(), toDate.getMonth() - index, 1);
+      monthKeys.push({
+        key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+        label: monthFormatter.format(date)
+      });
+    }
+
+    const emptyMonth = () => ({ applied: 0, reviewed: 0, shortlisted: 0, interview: 0, selected: 0, rejected: 0 });
+    const monthlyMap = Object.fromEntries(monthKeys.map(item => [item.key, emptyMonth()]));
+    const sourceMap = {};
+    const jobMap = Object.fromEntries(jobs.map(job => [String(job._id), {
+      id: job._id,
+      title: job.jobTitle,
+      applications: 0,
+      shortlisted: 0,
+      interviews: 0,
+      hired: 0
+    }]));
+
+    apps.forEach((app) => {
+      const date = new Date(app.appliedDate || app.createDate || now);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const month = monthlyMap[monthKey];
+      const status = app.status;
+      if (month) {
+        month.applied += 1;
+        if (status === 'Reviewed') month.reviewed += 1;
+        if (status === 'Shortlisted') month.shortlisted += 1;
+        if (status === 'Interview') month.interview += 1;
+        if (status === 'Offered') month.selected += 1;
+        if (status === 'Rejected') month.rejected += 1;
+      }
+
+      const source = sourceLabel(app);
+      sourceMap[source] = (sourceMap[source] || 0) + 1;
+
+      const jobStats = jobMap[String(app.job?._id || app.job)];
+      if (jobStats) {
+        jobStats.applications += 1;
+        if (status === 'Shortlisted') jobStats.shortlisted += 1;
+        if (status === 'Interview') jobStats.interviews += 1;
+        if (status === 'Offered' && app.selectionDetails?.offerStatus === 'Hired') jobStats.hired += 1;
+      }
+    });
+
+    const statusCounts = apps.reduce((acc, app) => ({ ...acc, [app.status]: (acc[app.status] || 0) + 1 }), {});
+    const hires = apps.filter(app => app.status === 'Offered' && app.selectionDetails?.offerStatus === 'Hired').length;
+    const rejected = statusCounts.Rejected || 0;
+    const totalApplications = apps.length;
+    const offersMade = statusCounts.Offered || 0;
+    const rejectionRate = totalApplications ? Math.round((rejected / totalApplications) * 100) : 0;
+
+    const stats = {
+      totalApplications,
+      shortlisted: statusCounts.Shortlisted || 0,
+      interviews: statusCounts.Interview || 0,
+      offersMade,
+      hires,
+      rejectionRate
+    };
+
+    const monthlyOverview = monthKeys.map(item => ({ month: item.label, ...monthlyMap[item.key] }));
+    const sources = Object.entries(sourceMap)
+      .map(([name, value]) => ({ name, value, percent: totalApplications ? Number(((value / totalApplications) * 100).toFixed(1)) : 0 }))
+      .sort((a, b) => b.value - a.value);
+
+    const funnel = [
+      { key: 'applied', title: 'Applied', value: totalApplications },
+      { key: 'shortlisted', title: 'Shortlisted', value: stats.shortlisted },
+      { key: 'interviewed', title: 'Interviewed', value: stats.interviews },
+      { key: 'offered', title: 'Offered', value: offersMade },
+      { key: 'hired', title: 'Hired', value: hires }
+    ].map(item => ({ ...item, percent: totalApplications ? Number(((item.value / totalApplications) * 100).toFixed(1)) : 0 }));
+
+    const recentApps = [...apps]
+      .sort((a, b) => new Date(b.updateDate || b.appliedDate) - new Date(a.updateDate || a.appliedDate))
+      .slice(0, 6);
+    const recentActivity = recentApps.map((app) => {
+      const statusTitle = {
+        Applied: 'New Application Received',
+        Shortlisted: 'Candidate Shortlisted',
+        Interview: 'Interview Scheduled',
+        Offered: app.selectionDetails?.offerStatus === 'Hired' ? 'Candidate Hired' : 'Offer Made',
+        Rejected: 'Candidate Rejected',
+        Reviewed: 'Application Reviewed'
+      };
+      return {
+        id: app._id,
+        type: app.status,
+        title: statusTitle[app.status] || 'Application Updated',
+        description: `${app.candidate?.name || 'Candidate'} - ${app.job?.jobTitle || 'Open Position'}`,
+        time: formatDisplayDate(app.updateDate || app.appliedDate)
+      };
+    });
+
+    const topJobs = Object.values(jobMap)
+      .filter(job => job.applications > 0)
+      .sort((a, b) => b.applications - a.applications)
+      .slice(0, 5)
+      .map(job => ({
+        ...job,
+        interviewRate: job.applications ? Math.round((job.interviews / job.applications) * 100) : 0,
+        conversionRate: job.applications ? Number(((job.hired / job.applications) * 100).toFixed(1)) : 0
+      }));
+
+    res.json({
+      range: {
+        from: formatDate(fromDate),
+        to: formatDate(toDate),
+        label: `${formatDisplayDate(fromDate)} - ${formatDisplayDate(toDate)}`
+      },
+      stats,
+      monthlyOverview,
+      sources,
+      funnel,
+      recentActivity,
+      topJobs
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -1217,14 +1559,29 @@ exports.updateApplicationStatus = async (req, res) => {
       return res.status(400).json({ message: 'Invalid application status.' });
     }
 
-    const application = await Application.findById(id);
+    const application = await Application.findById(id).populate('job', 'login minSalary maxSalary jobType');
     if (!application) {
       return res.status(404).json({ message: 'Application not found.' });
+    }
+
+    if (String(application.job?.login) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'You are not allowed to update this application.' });
     }
 
     application.status = status;
     if (status === 'Shortlisted') {
       application.shortlistedDate = new Date();
+    }
+    if (status === 'Offered') {
+      const currentDetails = application.selectionDetails || {};
+      application.selectionDetails = {
+        ...currentDetails,
+        selectedDate: currentDetails.selectedDate || new Date(),
+        interviewScore: currentDetails.interviewScore ?? application.matchScore ?? null,
+        offerStatus: currentDetails.offerStatus || 'Offer Sent',
+        salaryOffered: currentDetails.salaryOffered ?? application.job?.maxSalary ?? application.job?.minSalary ?? null,
+        offerSentAt: currentDetails.offerSentAt || new Date()
+      };
     }
     await application.save();
 
@@ -1234,23 +1591,80 @@ exports.updateApplicationStatus = async (req, res) => {
   }
 };
 
-exports.scheduleApplicationInterview = async (req, res) => {
+exports.updateSelectedOffer = async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, time, type, locationOrLink, notes } = req.body;
+    const {
+      offerStatus,
+      salaryOffered,
+      joiningDate,
+      employmentType,
+      interviewScore,
+      notes
+    } = req.body;
 
-    const application = await Application.findById(id);
+    if (!['Offer Sent', 'Offer Accepted', 'Offer Declined', 'Hired'].includes(offerStatus)) {
+      return res.status(400).json({ message: 'Invalid offer status.' });
+    }
+
+    const application = await Application.findById(id).populate('job', 'login minSalary maxSalary');
     if (!application) {
       return res.status(404).json({ message: 'Application not found.' });
     }
 
+    if (String(application.job?.login) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'You are not allowed to update this selected candidate.' });
+    }
+
+    application.status = 'Offered';
+    const currentDetails = application.selectionDetails || {};
+    application.selectionDetails = {
+      ...currentDetails,
+      selectedDate: currentDetails.selectedDate || new Date(),
+      interviewScore: interviewScore !== undefined ? Number(interviewScore) : (currentDetails.interviewScore ?? application.matchScore ?? null),
+      offerStatus,
+      salaryOffered: salaryOffered !== undefined && salaryOffered !== '' ? Number(salaryOffered) : (currentDetails.salaryOffered ?? application.job?.maxSalary ?? application.job?.minSalary ?? null),
+      joiningDate: joiningDate ? new Date(joiningDate) : currentDetails.joiningDate,
+      employmentType: employmentType ?? currentDetails.employmentType ?? '',
+      notes: notes ?? currentDetails.notes ?? '',
+      offerSentAt: currentDetails.offerSentAt || new Date(),
+      offerRespondedAt: ['Offer Accepted', 'Offer Declined'].includes(offerStatus) ? new Date() : currentDetails.offerRespondedAt,
+      hiredAt: offerStatus === 'Hired' ? new Date() : currentDetails.hiredAt
+    };
+
+    await application.save();
+
+    res.json({ message: `Offer status updated to ${offerStatus}.`, application });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.scheduleApplicationInterview = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { date, time, type, status, interviewer, locationOrLink, notes } = req.body;
+
+    const application = await Application.findById(id).populate('job', 'login contactPerson');
+    if (!application) {
+      return res.status(404).json({ message: 'Application not found.' });
+    }
+
+    if (String(application.job?.login) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'You are not allowed to schedule this application.' });
+    }
+
+    const normalizedType = type === 'Telephonic' ? 'Phone Call' : type;
+
     application.status = 'Interview';
     application.interviewDetails = {
-      date: date ? new Date(date) : undefined,
-      time,
-      type,
-      locationOrLink,
-      notes
+      date: date ? new Date(date) : application.interviewDetails?.date,
+      time: time || application.interviewDetails?.time || '',
+      type: normalizedType,
+      status: status || application.interviewDetails?.status || 'Scheduled',
+      interviewer: interviewer || application.interviewDetails?.interviewer || application.job?.contactPerson || req.user.firstName || req.user.companyName || '',
+      locationOrLink: locationOrLink ?? application.interviewDetails?.locationOrLink ?? '',
+      notes: notes ?? application.interviewDetails?.notes ?? ''
     };
 
     await application.save();

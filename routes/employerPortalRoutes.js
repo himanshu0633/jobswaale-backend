@@ -9,6 +9,9 @@ const {
   getEmployerProfile,
   getEmployerApplications,
   getEmployerCandidates,
+  getEmployerInterviews,
+  getEmployerReports,
+  getEmployerSelected,
   getEmployerJobForm,
   getEmployerJobDetails,
   getEmployerJobs,
@@ -16,6 +19,7 @@ const {
   updateEmployerJobAction,
   updateEmployerJob,
   updateApplicationStatus,
+  updateSelectedOffer,
   scheduleApplicationInterview
 } = require('../controllers/employerDashboardController');
 
@@ -25,6 +29,9 @@ router.get('/dashboard', getEmployerDashboard);
 router.get('/profile', getEmployerProfile);
 router.get('/applications', getEmployerApplications);
 router.get('/candidates', getEmployerCandidates);
+router.get('/interviews', getEmployerInterviews);
+router.get('/reports', getEmployerReports);
+router.get('/selected', getEmployerSelected);
 router.get('/job-form', getEmployerJobForm);
 router.get('/jobs', getEmployerJobs);
 router.get('/jobs/:id', getEmployerJobDetails);
@@ -38,5 +45,6 @@ router.delete('/jobs/:id', deleteEmployerJob);
 // Application actions
 router.patch('/applications/:id/status', updateApplicationStatus);
 router.post('/applications/:id/schedule-interview', scheduleApplicationInterview);
+router.patch('/selected/:id/offer', updateSelectedOffer);
 
 module.exports = router;

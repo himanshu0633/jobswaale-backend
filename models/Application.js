@@ -38,6 +38,15 @@ const ApplicationSchema = new mongoose.Schema({
       type: String,
       enum: ['Video Call', 'Phone Call', 'In-Person', 'Other']
     },
+    status: {
+      type: String,
+      enum: ['Scheduled', 'Completed', 'Rescheduled', 'Cancelled'],
+      default: 'Scheduled'
+    },
+    interviewer: {
+      type: String,
+      default: ''
+    },
     locationOrLink: {
       type: String,
       default: ''
@@ -45,6 +54,44 @@ const ApplicationSchema = new mongoose.Schema({
     notes: {
       type: String,
       default: ''
+    }
+  },
+  selectionDetails: {
+    selectedDate: {
+      type: Date
+    },
+    interviewScore: {
+      type: Number,
+      default: null
+    },
+    offerStatus: {
+      type: String,
+      enum: ['Offer Sent', 'Offer Accepted', 'Offer Declined', 'Hired'],
+      default: 'Offer Sent'
+    },
+    salaryOffered: {
+      type: Number,
+      default: null
+    },
+    joiningDate: {
+      type: Date
+    },
+    employmentType: {
+      type: String,
+      default: ''
+    },
+    notes: {
+      type: String,
+      default: ''
+    },
+    offerSentAt: {
+      type: Date
+    },
+    offerRespondedAt: {
+      type: Date
+    },
+    hiredAt: {
+      type: Date
     }
   }
 }, {

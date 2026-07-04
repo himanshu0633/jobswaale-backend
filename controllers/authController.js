@@ -124,7 +124,7 @@ exports.register = async (req, res) => {
       companySize: user.companySize,
       email: user.email,
       role: user.role,
-      token: generateToken(user._id, settings.sessionTimeout ? '60m' : '30d')
+      token: generateToken(user._id, '30d')
     });
   } catch (error) {
     console.error('Register Error:', error);
@@ -219,7 +219,7 @@ exports.login = async (req, res) => {
       roleName: user.roleRef?.name || user.role,
       accountType: user.accountType,
       permissions: rolePermissions,
-      token: generateToken(user._id, settings.sessionTimeout ? '60m' : '30d')
+      token: generateToken(user._id, '30d')
     });
   } catch (error) {
     console.error('Login Error:', error);
@@ -259,7 +259,7 @@ exports.seedAdmin = async (req, res) => {
       message: 'Initial Admin seeded successfully',
       email: admin.email,
       role: admin.role,
-      token: generateToken(admin._id, settings.sessionTimeout ? '60m' : '30d')
+      token: generateToken(admin._id, '30d')
     });
   } catch (error) {
     console.error('Seed Admin Error:', error);
