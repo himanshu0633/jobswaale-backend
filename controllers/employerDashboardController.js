@@ -1968,7 +1968,8 @@ exports.getEmployerTalentPool = async (req, res) => {
           user = await User.create({
             email: mc.email,
             password: '$2b$10$hashedpasswordplaceholder',
-            userType: 'jobseeker',
+            role: 'Jobseeker',
+            accountType: 'jobseeker',
             firstName: mc.name.split(' ')[0],
             lastName: mc.name.split(' ').slice(1).join(' ') || ''
           });
