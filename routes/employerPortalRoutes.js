@@ -7,6 +7,8 @@ const {
   duplicateEmployerJob,
   getEmployerDashboard,
   getEmployerProfile,
+  updateEmployerProfile,
+  getEmployerSubscription,
   getEmployerApplications,
   getEmployerCandidates,
   getEmployerInterviews,
@@ -20,13 +22,22 @@ const {
   updateEmployerJob,
   updateApplicationStatus,
   updateSelectedOffer,
-  scheduleApplicationInterview
+  scheduleApplicationInterview,
+  getEmployerTalentPool,
+  addEmployerTalentPool,
+  removeEmployerTalentPool,
+  searchEmployerTalentPoolCandidates,
+  getEmployerSettings,
+  updateEmployerSettings,
+  submitSupportTicket
 } = require('../controllers/employerDashboardController');
 
 router.use(protect, authorizeEmployerPortal);
 
 router.get('/dashboard', getEmployerDashboard);
 router.get('/profile', getEmployerProfile);
+router.put('/profile', updateEmployerProfile);
+router.get('/subscription-details', getEmployerSubscription);
 router.get('/applications', getEmployerApplications);
 router.get('/candidates', getEmployerCandidates);
 router.get('/interviews', getEmployerInterviews);
@@ -46,5 +57,18 @@ router.delete('/jobs/:id', deleteEmployerJob);
 router.patch('/applications/:id/status', updateApplicationStatus);
 router.post('/applications/:id/schedule-interview', scheduleApplicationInterview);
 router.patch('/selected/:id/offer', updateSelectedOffer);
+
+// Talent Pool routes
+router.get('/talent-pool', getEmployerTalentPool);
+router.post('/talent-pool', addEmployerTalentPool);
+router.delete('/talent-pool/:id', removeEmployerTalentPool);
+router.get('/talent-pool/search', searchEmployerTalentPoolCandidates);
+
+// Settings routes
+router.get('/settings', getEmployerSettings);
+router.put('/settings', updateEmployerSettings);
+
+// Support Ticket routes
+router.post('/support/ticket', submitSupportTicket);
 
 module.exports = router;

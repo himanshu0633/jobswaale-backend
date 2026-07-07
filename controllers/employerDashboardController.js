@@ -9,6 +9,12 @@ const City = require('../models/City');
 const State = require('../models/State');
 const District = require('../models/District');
 const Country = require('../models/Country');
+const IndustryType = require('../models/IndustryType');
+const Plan = require('../models/Plan');
+const Payment = require('../models/Payment');
+const TalentPool = require('../models/TalentPool');
+const User = require('../models/User');
+const SupportTicket = require('../models/SupportTicket');
 
 const formatDate = (value) => {
   if (!value) return null;
@@ -1121,9 +1127,27 @@ exports.getEmployerProfile = async (req, res) => {
     const employer = await Employer.findOne({
       $or: [{ userId }, { login: userId }],
       isDeleted: { $ne: true }
-    }).populate('currentPlan').lean();
+    }).populate('currentPlan').populate('industryType').lean();
+
+    const allJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).lean();
+    const jobIds = allJobs.map(j => j._id);
+
+    const activeJobsCount = allJobs.filter(j => j.status === 'Active').length;
+    const hiredCount = await Application.countDocuments({ job: { $in: jobIds }, status: 'Offered' });
 
     const plan = employer?.currentPlan || null;
+    const planLimit = Number(plan?.freeJobPosts || 50);
+    const jobsUsed = allJobs.length;
+    const remainingCredits = Math.max(planLimit - jobsUsed, 0);
+    const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
+
+    const [industries, states, districts, cities, countries] = await Promise.all([
+      IndustryType.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).lean(),
+      State.find({ isDeleted: { $ne: true }, status: 'active' }).lean(),
+      District.find({ isDeleted: { $ne: true }, status: 'active' }).lean(),
+      City.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ cityName: 1 }).lean(),
+      Country.find({ isDeleted: { $ne: true }, status: 'active' }).lean()
+    ]);
 
     res.json({
       name: employer?.companyName || req.user.companyName || req.user.firstName || 'Employer',
@@ -1132,7 +1156,228 @@ exports.getEmployerProfile = async (req, res) => {
       planName: plan?.planName || 'No Plan',
       planBadge: plan?.badge || plan?.planName || 'No Plan',
       planValidity: employer?.planValidity || null,
-      logo: employer?.logo || ''
+      logo: employer?.logo || '',
+
+      // Extended Profile Fields
+      companyName: employer?.companyName || req.user.companyName || '',
+      contactPerson: employer?.contactPerson || `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+      phone: employer?.phone || req.user.phone || '',
+      email: req.user.email,
+      industryType: employer?.industryType || null,
+      website: employer?.website || '',
+      description: employer?.description || '',
+      country: employer?.country || '',
+      state: employer?.state || '',
+      district: employer?.district || '',
+      city: employer?.city || '',
+      address: employer?.address || '',
+      pinCode: employer?.pinCode || '',
+      tagline: employer?.tagline || '',
+      foundedYear: employer?.foundedYear || '',
+      companySize: employer?.companySize || req.user.companySize || '',
+      gstNumber: employer?.gstNumber || '',
+      profileViews: employer?.profileViews !== undefined ? employer.profileViews : 5230,
+      rating: employer?.rating !== undefined ? employer.rating : 4.2,
+      socialLinks: employer?.socialLinks || {
+        linkedin: '',
+        twitter: '',
+        youtube: '',
+        facebook: '',
+        instagram: ''
+      },
+      teamMembers: employer?.teamMembers && employer.teamMembers.length > 0 ? employer.teamMembers : [
+        { name: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(), role: req.user.designation || 'HR Manager', accessLevel: 'Owner' }
+      ],
+
+      // Stats
+      stats: {
+        activeJobs: activeJobsCount,
+        hired: hiredCount,
+        profileViews: employer?.profileViews !== undefined ? employer.profileViews : 5230,
+        rating: employer?.rating !== undefined ? employer.rating : 4.2
+      },
+
+      // Subscription
+      subscription: {
+        planName: plan?.planName || 'No Plan',
+        status: employer?.status === 'blacklist' ? 'Inactive' : 'Active',
+        validUntil: employer?.planValidity || plan?.endDate || null,
+        jobsUsed,
+        jobLimit: planLimit,
+        remainingCredits,
+        utilization
+      },
+
+      // Masters
+      industries,
+      states,
+      districts,
+      cities,
+      countries
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateEmployerProfile = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const {
+      companyName,
+      contactPerson,
+      phone,
+      industryType,
+      website,
+      description,
+      country,
+      state,
+      district,
+      city,
+      address,
+      pinCode,
+      tagline,
+      foundedYear,
+      companySize,
+      gstNumber,
+      socialLinks,
+      teamMembers,
+      logo
+    } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    let employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    });
+
+    if (!employer) {
+      employer = new Employer({
+        userId,
+        login: userId,
+        companyName: companyName || user.companyName || 'My Company',
+        phone: phone || user.phone || '0000000000',
+        country: country || '',
+        state: state || '',
+        district: district || '',
+        city: city || '',
+        address: address || '',
+        pinCode: pinCode || '',
+        status: 'active'
+      });
+    }
+
+    if (companyName) {
+      employer.companyName = companyName;
+      await User.findByIdAndUpdate(userId, { companyName });
+    }
+    if (contactPerson !== undefined) employer.contactPerson = contactPerson;
+    if (phone) {
+      employer.phone = phone;
+      await User.findByIdAndUpdate(userId, { phone });
+    }
+    if (industryType !== undefined) employer.industryType = industryType || null;
+    if (website !== undefined) employer.website = website;
+    if (description !== undefined) employer.description = description;
+    if (country !== undefined) employer.country = country;
+    if (state !== undefined) employer.state = state;
+    if (district !== undefined) employer.district = district;
+    if (city !== undefined) employer.city = city;
+    if (address !== undefined) employer.address = address;
+    if (pinCode !== undefined) employer.pinCode = pinCode;
+    if (logo !== undefined) employer.logo = logo;
+    if (tagline !== undefined) employer.tagline = tagline;
+    if (foundedYear !== undefined) employer.foundedYear = foundedYear;
+    if (companySize !== undefined) {
+      employer.companySize = companySize;
+      await User.findByIdAndUpdate(userId, { companySize });
+    }
+    if (gstNumber !== undefined) employer.gstNumber = gstNumber;
+    if (socialLinks !== undefined) employer.socialLinks = socialLinks;
+    if (teamMembers !== undefined) employer.teamMembers = teamMembers;
+
+    await employer.save();
+
+    res.json({ message: 'Profile updated successfully', employer });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getEmployerSubscription = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    }).populate('currentPlan').lean();
+
+    const allJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).lean();
+    const jobIds = allJobs.map(j => j._id);
+
+    const activeJobsCount = allJobs.filter(j => j.status === 'Active').length;
+    const applicationsCount = await Application.countDocuments({ job: { $in: jobIds } });
+    const teamMembersCount = employer?.teamMembers?.length || 1;
+
+    const plan = employer?.currentPlan || null;
+    const planLimit = Number(plan?.freeJobPosts || 50);
+    const jobsUsed = allJobs.length;
+    const remainingCredits = Math.max(planLimit - jobsUsed, 0);
+    const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
+
+    let daysRemaining = 0;
+    if (employer?.planValidity) {
+      const diffMs = new Date(employer.planValidity).getTime() - Date.now();
+      daysRemaining = Math.max(Math.ceil(diffMs / (1000 * 60 * 60 * 24)), 0);
+    } else if (plan?.endDate) {
+      const diffMs = new Date(plan.endDate).getTime() - Date.now();
+      daysRemaining = Math.max(Math.ceil(diffMs / (1000 * 60 * 60 * 24)), 0);
+    }
+
+    // Retrieve active plans of category 'Employer'
+    const availablePlans = await Plan.find({
+      category: 'Employer',
+      status: 'active',
+      isDeleted: { $ne: true }
+    }).sort({ displayOrder: 1, cost: 1 }).lean();
+
+    // Query success payments history
+    const billingHistory = await Payment.find({
+      $or: [
+        { customer: employer?._id },
+        { login: userId }
+      ],
+      paymentStatus: 'Success',
+      isDeleted: { $ne: true }
+    }).sort({ paymentDate: -1 }).lean();
+
+    res.json({
+      subscription: {
+        planName: plan?.planName || 'Free Plan',
+        status: employer?.status === 'blacklist' ? 'Inactive' : 'Active',
+        validUntil: employer?.planValidity || plan?.endDate || null,
+        jobsUsed,
+        jobLimit: planLimit,
+        remainingCredits,
+        utilization,
+        applicationsCount,
+        applicationsLimit: 500, // standard display limit
+        teamMembersCount,
+        teamMembersLimit: 10,
+        daysRemaining
+      },
+      stats: {
+        activeJobs: activeJobsCount,
+        applications: applicationsCount,
+        teamMembers: teamMembersCount,
+        daysRemaining
+      },
+      availablePlans,
+      billingHistory
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -1670,6 +1915,514 @@ exports.scheduleApplicationInterview = async (req, res) => {
     await application.save();
 
     res.json({ message: 'Interview scheduled successfully.', application });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// =========================================================================
+// TALENT POOL CONTROLLER FUNCTIONS
+// =========================================================================
+
+// Get Talent Pool for an Employer (with filtering, sorting, statistics, and seeding)
+exports.getEmployerTalentPool = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const query = req.query || {};
+
+    // 1. Fetch current employer's pool
+    let poolItems = await TalentPool.find({ employerId: userId, isDeleted: { $ne: true } })
+      .populate({
+        path: 'candidateId',
+        populate: [
+          { path: 'userId', select: 'email' },
+          { path: 'qualification', select: 'name' },
+          { path: 'jobCategory', select: 'categoryName' },
+          { path: 'jobType', select: 'jobType' },
+          { path: 'currentPlan', select: 'planName' }
+        ]
+      })
+      .lean();
+
+    // 2. Auto-seed if pool is empty
+    if (poolItems.length === 0) {
+      const mockCandidates = [
+        { name: 'Priya Sharma', email: 'priya@gmail.com', city: 'Bangalore', state: 'Karnataka', experience: '5+ Years', category: 'High Potential', skills: ['React', 'JS', 'TS'], phone: '9876543210', gender: 'Female' },
+        { name: 'Arjun Mehta', email: 'arjun@gmail.com', city: 'Pune', state: 'Maharashtra', experience: '2 - 5 Years', category: 'Technical Skills', skills: ['Python', 'Django', 'AWS'], phone: '9876543211', gender: 'Male' },
+        { name: 'Neha Singh', email: 'neha@gmail.com', city: 'Mumbai', state: 'Maharashtra', experience: '5+ Years', category: 'Leadership Quality', skills: ['UI/UX', 'Figma', 'Sketch'], phone: '9876543212', gender: 'Female' },
+        { name: 'Amit Verma', email: 'amit@gmail.com', city: 'Delhi', state: 'Delhi', experience: '2 - 5 Years', category: 'Cultural Fit', skills: ['Java', 'Spring', 'MySQL'], phone: '9876543213', gender: 'Male' },
+        { name: 'Sneha Gupta', email: 'sneha@gmail.com', city: 'Jaipur', state: 'Rajasthan', experience: '1 - 2 Years', category: 'Future Reference', skills: ['SEO', 'Content', 'Analytics'], phone: '9876543214', gender: 'Female' },
+        { name: 'Vikram Patel', email: 'vikram@gmail.com', city: 'Ahmedabad', state: 'Gujarat', experience: '5+ Years', category: 'High Potential', skills: ['React', 'Node', 'MongoDB'], phone: '9876543215', gender: 'Male' },
+        { name: 'Karan Malhotra', email: 'karan@gmail.com', city: 'Chandigarh', state: 'Punjab', experience: 'Fresher', category: 'Leadership Quality', skills: ['Python', 'ML', 'SQL'], phone: '9876543216', gender: 'Male' }
+      ];
+
+      let qual = await Qualification.findOne();
+      if (!qual) {
+        qual = await Qualification.create({ name: 'Graduate' });
+      }
+
+      for (const mc of mockCandidates) {
+        // Find or create User
+        let user = await User.findOne({ email: mc.email });
+        if (!user) {
+          user = await User.create({
+            email: mc.email,
+            password: '$2b$10$hashedpasswordplaceholder',
+            userType: 'jobseeker',
+            firstName: mc.name.split(' ')[0],
+            lastName: mc.name.split(' ').slice(1).join(' ') || ''
+          });
+        }
+
+        // Find or create Jobseeker
+        let seeker = await Jobseeker.findOne({ userId: user._id });
+        if (!seeker) {
+          seeker = await Jobseeker.create({
+            userId: user._id,
+            login: user._id,
+            name: mc.name,
+            phone: mc.phone,
+            gender: mc.gender,
+            qualification: qual._id,
+            experience: mc.experience,
+            country: 'India',
+            state: mc.state,
+            district: mc.city,
+            city: mc.city,
+            address: 'Not Specified',
+            pinCode: '560001',
+            status: 'active'
+          });
+        }
+
+        // Add to TalentPool
+        await TalentPool.create({
+          employerId: userId,
+          candidateId: seeker._id,
+          category: mc.category,
+          skills: mc.skills,
+          note: `Mock seeded candidate: ${mc.name}`
+        });
+      }
+
+      // Re-fetch seeded items
+      poolItems = await TalentPool.find({ employerId: userId, isDeleted: { $ne: true } })
+        .populate({
+          path: 'candidateId',
+          populate: [
+            { path: 'userId', select: 'email' },
+            { path: 'qualification', select: 'name' },
+            { path: 'jobCategory', select: 'categoryName' },
+            { path: 'jobType', select: 'jobType' },
+            { path: 'currentPlan', select: 'planName' }
+          ]
+        })
+        .lean();
+    }
+
+    // 3. Map candidates
+    const mapMockSkills = (name = '') => {
+      const n = String(name).toLowerCase();
+      if (n.includes('priya')) return ['React', 'JS', 'TS'];
+      if (n.includes('arjun')) return ['Python', 'Django', 'AWS'];
+      if (n.includes('neha')) return ['UI/UX', 'Figma', 'Sketch'];
+      if (n.includes('amit')) return ['Java', 'Spring', 'MySQL'];
+      if (n.includes('sneha')) return ['SEO', 'Content', 'Analytics'];
+      if (n.includes('vikram')) return ['React', 'Node', 'MongoDB'];
+      if (n.includes('karan')) return ['Python', 'ML', 'SQL'];
+      return ['HTML', 'CSS', 'JS'];
+    };
+
+    let mapped = poolItems.map((item, idx) => {
+      if (!item.candidateId) return null;
+      const cMapped = mapCandidate(item.candidateId, idx);
+      return {
+        ...cMapped,
+        talentPoolId: item._id,
+        category: item.category,
+        skills: item.skills && item.skills.length > 0 ? item.skills : mapMockSkills(item.candidateId.name),
+        note: item.note || '',
+        dateAdded: item.createDate || item.createdAt
+      };
+    }).filter(Boolean);
+
+    // 4. Apply filters
+    const search = String(query.search || '').trim().toLowerCase();
+    const category = String(query.category || '').trim();
+    const experience = String(query.experience || '').trim();
+
+    mapped = mapped.filter(item => {
+      const searchableText = [
+        item.name,
+        item.email,
+        item.phone,
+        item.location,
+        item.skills.join(' '),
+        item.category,
+        item.experience
+      ].join(' ').toLowerCase();
+
+      const matchesSearch = !search || searchableText.includes(search);
+      const matchesCategory = !category || item.category === category;
+      const matchesExperience = !experience || item.experience === experience;
+
+      return matchesSearch && matchesCategory && matchesExperience;
+    });
+
+    // 5. Apply sorting
+    const sortBy = String(query.sortBy || '').trim();
+    if (sortBy === 'Oldest First') {
+      mapped.sort((a, b) => new Date(a.dateAdded).getTime() - new Date(b.dateAdded).getTime());
+    } else if (sortBy === 'Name A-Z') {
+      mapped.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === 'Name Z-A') {
+      mapped.sort((a, b) => b.name.localeCompare(a.name));
+    } else {
+      // Default: Newest First
+      mapped.sort((a, b) => new Date(b.dateAdded).getTime() - new Date(a.dateAdded).getTime());
+    }
+
+    // 6. Calculate Stats
+    const totalCount = poolItems.length;
+    const highPotentialCount = poolItems.filter(item => item.category === 'High Potential').length;
+    const technicalCount = poolItems.filter(item => item.category === 'Technical Skills').length;
+    const leadershipCount = poolItems.filter(item => item.category === 'Leadership Quality').length;
+    
+    // Candidates added in last 30 days
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const newThisMonthCount = poolItems.filter(item => {
+      const added = item.createDate || item.createdAt;
+      return added && new Date(added) >= thirtyDaysAgo;
+    }).length;
+
+    res.json({
+      candidates: mapped,
+      stats: {
+        totalCount,
+        highPotentialCount,
+        technicalCount,
+        leadershipCount,
+        newThisMonthCount
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Add candidate to pool
+exports.addEmployerTalentPool = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { candidateId, category, skills, note } = req.body;
+
+    if (!candidateId) {
+      return res.status(400).json({ message: 'Candidate ID is required.' });
+    }
+
+    // Check if jobseeker exists
+    const candidate = await Jobseeker.findById(candidateId);
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found.' });
+    }
+
+    // Check if already in pool
+    let poolItem = await TalentPool.findOne({ employerId: userId, candidateId, isDeleted: { $ne: true } });
+    if (poolItem) {
+      poolItem.category = category || poolItem.category;
+      poolItem.skills = skills || poolItem.skills;
+      poolItem.note = note || poolItem.note;
+      await poolItem.save();
+      return res.json({ message: 'Talent pool candidate updated.', poolItem });
+    }
+
+    poolItem = await TalentPool.create({
+      employerId: userId,
+      candidateId,
+      category: category || 'High Potential',
+      skills: skills || [],
+      note: note || ''
+    });
+
+    res.json({ message: 'Candidate saved to talent pool.', poolItem });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Remove candidate from pool
+exports.removeEmployerTalentPool = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { id } = req.params; // Can be TalentPool record ID or Candidate ID
+
+    if (!id) {
+      return res.status(400).json({ message: 'Record ID or candidate ID is required.' });
+    }
+
+    const poolItem = await TalentPool.findOne({
+      employerId: userId,
+      $or: [{ _id: id }, { candidateId: id }],
+      isDeleted: { $ne: true }
+    });
+
+    if (!poolItem) {
+      return res.status(404).json({ message: 'Candidate not found in talent pool.' });
+    }
+
+    poolItem.isDeleted = true;
+    await poolItem.save();
+
+    res.json({ message: 'Candidate removed from talent pool successfully.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Search all candidates in system *not* in current pool
+exports.searchEmployerTalentPoolCandidates = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const search = String(req.query.search || '').trim().toLowerCase();
+
+    // Find candidate IDs already in the pool
+    const poolItems = await TalentPool.find({ employerId: userId, isDeleted: { $ne: true } }).select('candidateId').lean();
+    const excludedIds = poolItems.map(item => item.candidateId);
+
+    // Query jobseekers
+    const candidates = await Jobseeker.find({
+      _id: { $nin: excludedIds },
+      isDeleted: { $ne: true },
+      status: { $ne: 'blacklist' }
+    })
+      .populate('userId', 'email')
+      .populate('qualification', 'name')
+      .populate('jobCategory', 'categoryName')
+      .populate('jobType', 'jobType')
+      .populate('currentPlan', 'planName')
+      .lean();
+
+    let mapped = candidates.map(mapCandidate);
+
+    if (search) {
+      mapped = mapped.filter(item => {
+        const text = [
+          item.name,
+          item.email,
+          item.phone,
+          item.location,
+          item.role,
+          item.experience
+        ].join(' ').toLowerCase();
+        return text.includes(search);
+      });
+    }
+
+    res.json(mapped);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// =========================================================================
+// RECRUITER SETTINGS FUNCTIONS
+// =========================================================================
+
+// Get Recruiter Settings
+exports.getEmployerSettings = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    let employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    });
+
+    if (!employer) {
+      // Create a basic employer profile if none exists
+      employer = await Employer.create({
+        userId,
+        login: userId,
+        companyName: req.user.companyName || 'TechCorp India',
+        phone: req.user.phone || '9876543210'
+      });
+    }
+
+    const fullName = [req.user.firstName, req.user.lastName].filter(Boolean).join(' ') || req.user.companyName || 'Recruiter';
+
+    res.json({
+      profile: {
+        fullName,
+        email: req.user.email,
+        phone: employer.phone || req.user.phone || '',
+        jobTitle: req.user.designation || '',
+        department: employer.department || '',
+        altEmail: employer.altEmail || '',
+        bio: employer.bio || ''
+      },
+      settings: employer.settings || {
+        notifications: {
+          newApplications: true,
+          interviewReminders: true,
+          candidateMessages: true,
+          pipelineProgress: true,
+          billingUpdates: true,
+          weeklyDigest: false,
+          appApplications: true,
+          appReminders: true,
+          appAnnouncements: true
+        },
+        preferences: {
+          language: 'en',
+          timezone: 'IST',
+          dateFormat: 'DD/MM/YYYY',
+          timeFormat: '12hr',
+          currency: 'INR',
+          itemsPerPage: '10'
+        },
+        privacy: {
+          showPublic: true,
+          showPhone: false,
+          readReceipts: true,
+          emailSearch: true
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Update Recruiter Settings
+exports.updateEmployerSettings = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { type, profile, password, notifications, preferences, privacy } = req.body;
+
+    let employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    });
+
+    if (!employer) {
+      employer = await Employer.create({
+        userId,
+        login: userId,
+        companyName: req.user.companyName || 'TechCorp India',
+        phone: req.user.phone || '9876543210'
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    if (type === 'profile') {
+      const parts = String(profile.fullName || '').trim().split(/\s+/);
+      user.firstName = parts[0] || '';
+      user.lastName = parts.slice(1).join(' ') || '';
+      user.designation = profile.jobTitle || '';
+      await user.save();
+
+      employer.phone = profile.phone || employer.phone;
+      employer.department = profile.department || '';
+      employer.altEmail = profile.altEmail || '';
+      employer.bio = profile.bio || '';
+      await employer.save();
+
+      return res.json({ message: 'Profile settings saved successfully.' });
+    }
+
+    if (type === 'password') {
+      const { current, newPass } = password;
+      const isMatch = await user.comparePassword(current);
+      if (!isMatch) {
+        return res.status(400).json({ message: 'Current password is incorrect.' });
+      }
+
+      user.password = newPass;
+      await user.save();
+
+      return res.json({ message: 'Password updated successfully.' });
+    }
+
+    if (type === 'notifications') {
+      employer.settings = {
+        ...employer.settings,
+        notifications: {
+          ...employer.settings?.notifications,
+          ...notifications
+        }
+      };
+      await employer.save();
+      return res.json({ message: 'Notification settings saved.' });
+    }
+
+    if (type === 'preferences') {
+      employer.settings = {
+        ...employer.settings,
+        preferences: {
+          ...employer.settings?.preferences,
+          ...preferences
+        }
+      };
+      await employer.save();
+      return res.json({ message: 'App preferences saved.' });
+    }
+
+    if (type === 'privacy') {
+      employer.settings = {
+        ...employer.settings,
+        privacy: {
+          ...employer.settings?.privacy,
+          ...privacy
+        }
+      };
+      await employer.save();
+      return res.json({ message: 'Privacy preferences saved.' });
+    }
+
+    if (type === 'delete') {
+      user.isDeleted = true;
+      user.status = 'inactive';
+      await user.save();
+
+      employer.isDeleted = true;
+      employer.status = 'blacklist';
+      await employer.save();
+
+      return res.json({ message: 'Recruiter account deleted successfully.' });
+    }
+
+    return res.status(400).json({ message: 'Invalid settings update type.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Submit Support Ticket
+exports.submitSupportTicket = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { subject, priority, message, attachment } = req.body;
+
+    if (!subject || !message) {
+      return res.status(400).json({ message: 'Subject and details are required.' });
+    }
+
+    const ticket = await SupportTicket.create({
+      userId,
+      email: req.user.email,
+      subject,
+      priority: priority || 'Medium',
+      message,
+      attachment: attachment || ''
+    });
+
+    res.status(201).json({
+      message: 'Support ticket submitted successfully.',
+      ticket
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
