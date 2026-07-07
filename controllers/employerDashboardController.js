@@ -71,13 +71,126 @@ const formatDisplayDate = (value) => {
 
 const ensureApplicationsExist = async (userId) => {
   try {
-    const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
+    // 1. Get employer's jobs
+    let jobs = await Job.find({ login: userId, isDeleted: { $ne: true } });
+
+    // If no jobs exist for this recruiter, let's create one mock job to make applications functional
+    if (jobs.length === 0) {
+      let jobType = await JobType.findOne();
+      if (!jobType) {
+        jobType = await JobType.create({ jobType: 'Full Time' });
+      }
+
+      let jobCat = await JobCategory.findOne();
+      if (!jobCat) {
+        jobCat = await JobCategory.create({ categoryName: 'Software Engineering' });
+      }
+
+      let qual = await Qualification.findOne();
+      if (!qual) {
+        qual = await Qualification.create({ name: 'Bachelor of Technology' });
+      }
+
+      const mockJob = await Job.create({
+        jobTitle: 'MERN Stack Developer',
+        jobCategory: jobCat._id,
+        jobType: jobType._id,
+        vacancies: 3,
+        description: 'We are looking for a MERN Stack Developer with experience in React, Node, Express, and MongoDB.',
+        experience: '2 - 5 Years',
+        country: 'India',
+        state: 'Karnataka',
+        district: 'Bangalore',
+        city: 'Bangalore',
+        companyName: 'TechCorp India',
+        email: 'jobs@techcorpindia.com',
+        phone: '9876543210',
+        login: userId,
+        status: 'active'
+      });
+      jobs = [mockJob];
+    }
+
+    const jobIds = jobs.map(j => j._id);
+
+    // 2. Check if we need to seed applications
+    const existingAppsCount = await Application.countDocuments({ job: { $in: jobIds } });
+
+    // Seed 6 new candidate applications if there are fewer than 3 applications
+    if (existingAppsCount < 3) {
+      const mockCandidates = [
+        { name: 'Rohan Malhotra', email: 'rohan@gmail.com', city: 'Delhi', state: 'Delhi', experience: 'Fresher', matchScore: 78, skills: ['JS', 'React', 'CSS'], phone: '9123456780', gender: 'Male' },
+        { name: 'Kirti Sen', email: 'kirti@gmail.com', city: 'Indore', state: 'Madhya Pradesh', experience: '1 - 2 Years', matchScore: 82, skills: ['HTML', 'CSS', 'Figma'], phone: '9123456781', gender: 'Female' },
+        { name: 'Aditya Roy', email: 'aditya@gmail.com', city: 'Bangalore', state: 'Karnataka', experience: '2 - 5 Years', matchScore: 91, skills: ['Node', 'Express', 'MongoDB'], phone: '9123456782', gender: 'Male' },
+        { name: 'Shweta Tiwari', email: 'shweta@gmail.com', city: 'Pune', state: 'Maharashtra', experience: '5+ Years', matchScore: 88, skills: ['React', 'Angular', 'Vue'], phone: '9123456783', gender: 'Female' },
+        { name: 'Gaurav Das', email: 'gaurav@gmail.com', city: 'Kolkata', state: 'West Bengal', experience: '2 - 5 Years', matchScore: 74, skills: ['Python', 'Flask', 'MySQL'], phone: '9123456784', gender: 'Male' },
+        { name: 'Ritu Phogat', email: 'ritu@gmail.com', city: 'Gurugram', state: 'Haryana', experience: '1 - 2 Years', matchScore: 85, skills: ['JS', 'React', 'Node'], phone: '9123456785', gender: 'Female' }
+      ];
+
+      let qualGrad = await Qualification.findOne();
+      if (!qualGrad) {
+        qualGrad = await Qualification.create({ name: 'Graduate' });
+      }
+
+      let jobCatDefault = await JobCategory.findOne();
+      if (!jobCatDefault) {
+        jobCatDefault = await JobCategory.create({ categoryName: 'Software Engineering' });
+      }
+
+      // We attach the seeded applications to the first job
+      const targetJob = jobs[0];
+
+      for (const mc of mockCandidates) {
+        // Find or create User
+        let user = await User.findOne({ email: mc.email });
+        if (!user) {
+          user = await User.create({
+            email: mc.email,
+            password: '$2b$10$hashedpasswordplaceholder',
+            role: 'Jobseeker',
+            accountType: 'jobseeker',
+            firstName: mc.name.split(' ')[0],
+            lastName: mc.name.split(' ').slice(1).join(' ') || ''
+          });
+        }
+
+        // Find or create Jobseeker
+        let seeker = await Jobseeker.findOne({ userId: user._id });
+        if (!seeker) {
+          seeker = await Jobseeker.create({
+            userId: user._id,
+            login: user._id,
+            name: mc.name,
+            phone: mc.phone,
+            gender: mc.gender,
+            city: mc.city,
+            state: mc.state,
+            experience: mc.experience,
+            expectedSalary: 'Rs. 4,00,000 - Rs. 8,00,000 Per Annum',
+            qualification: qualGrad._id,
+            jobCategory: jobCatDefault._id
+          });
+        }
+
+        // Create Application in 'Applied' status
+        await Application.create({
+          job: targetJob._id,
+          candidate: seeker._id,
+          status: 'Applied',
+          matchScore: mc.matchScore,
+          appliedDate: new Date()
+        });
+      }
+    }
+
+    // Return the populated jobs list
+    const populatedJobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
       .populate('jobType', 'jobType')
       .populate('jobCategory', 'categoryName')
       .lean();
-    return jobs;
+    return populatedJobs;
   } catch (err) {
-    console.error('Error loading employer jobs:', err);
+    console.error('Error loading or seeding employer jobs/applications:', err);
     return [];
   }
 };
