@@ -24,7 +24,7 @@ exports.savePlanMappings = async (req, res) => {
       return {
         updateOne: {
           filter: query,
-          update: { $set: update, $setOnInsert: { login: onCreate.login, ip: onCreate.ip } },
+          update: { $set: update, $setOnInsert: { login: onCreate.login } },
           upsert: true
         }
       };

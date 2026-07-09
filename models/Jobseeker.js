@@ -105,6 +105,55 @@ const JobseekerSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  dob: {
+    type: String,
+    default: ''
+  },
+  designation: {
+    type: String,
+    default: ''
+  },
+  relocate: {
+    type: String,
+    enum: ['yes', 'no'],
+    default: 'yes'
+  },
+  bio: {
+    type: String,
+    default: ''
+  },
+  passingYear: {
+    type: String,
+    default: ''
+  },
+  studyField: {
+    type: String,
+    default: ''
+  },
+  university: {
+    type: String,
+    default: ''
+  },
+  skills: {
+    type: [String],
+    default: []
+  },
+  linkedin: {
+    type: String,
+    default: ''
+  },
+  portfolio: {
+    type: String,
+    default: ''
+  },
+  github: {
+    type: String,
+    default: ''
+  },
+  savedJobs: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Job'
+  }],
   isDeleted: {
     type: Boolean,
     default: false

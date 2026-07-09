@@ -201,9 +201,35 @@ const JobSchema = new mongoose.Schema({
   isDeleted: {
     type: Boolean,
     default: false
+  },
+  slug: {
+    type: String,
+    unique: true,
+    sparse: true
   }
 }, {
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
+});
+
+const slugify = (text) => {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-]+/g, '')
+    .replace(/\-\-+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '');
+};
+
+JobSchema.pre('save', function () {
+  if (this.isModified('jobTitle') || this.isModified('companyName') || !this.slug) {
+    const base = `${this.jobTitle || 'job'}-${this.companyName || 'company'}`;
+    const baseSlug = slugify(base);
+    const uniqueSuffix = String(this._id).slice(-6);
+    this.slug = `${baseSlug}-${uniqueSuffix}`;
+  }
 });
 
 module.exports = mongoose.model('Job', JobSchema);
