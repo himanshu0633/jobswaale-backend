@@ -89,7 +89,7 @@ const PaymentSchema = new mongoose.Schema({
   },
   validityType: {
     type: String,
-    enum: ['One Time', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'Always Free'],
+    enum: ['One Time', 'Weekly', 'Monthly', 'Quarterly', 'Half-Yearly', 'Yearly', 'Always Free'],
     required: true
   },
   validFrom: {

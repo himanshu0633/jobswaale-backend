@@ -9,6 +9,7 @@ const {
   getEmployerProfile,
   updateEmployerProfile,
   getEmployerSubscription,
+  selectEmployerPlan,
   getEmployerApplications,
   getEmployerCandidates,
   getEmployerInterviews,
@@ -38,6 +39,7 @@ router.get('/dashboard', getEmployerDashboard);
 router.get('/profile', getEmployerProfile);
 router.put('/profile', updateEmployerProfile);
 router.get('/subscription-details', getEmployerSubscription);
+router.post('/subscription/select-plan', selectEmployerPlan);
 router.get('/applications', getEmployerApplications);
 router.get('/candidates', getEmployerCandidates);
 router.get('/interviews', getEmployerInterviews);

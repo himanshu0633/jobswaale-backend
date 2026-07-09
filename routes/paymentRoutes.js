@@ -9,6 +9,7 @@ const {
   getPaymentById,
   createPayment,
   updatePayment,
+  updatePaymentStatus,
   deletePayment
 } = require('../controllers/paymentController');
 
@@ -19,6 +20,7 @@ router.get('/', getPayments);
 router.get('/:uid', getPaymentById);
 router.post('/', authorize('Admin'), auditMiddleware, createPayment);
 router.put('/:uid', authorize('Admin'), auditMiddleware, updatePayment);
+router.patch('/:uid/status', authorize('Admin'), auditMiddleware, updatePaymentStatus);
 router.delete('/:uid', authorize('Admin'), auditMiddleware, deletePayment);
 
 module.exports = router;

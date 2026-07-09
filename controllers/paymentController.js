@@ -286,6 +286,35 @@ exports.updatePayment = async (req, res) => {
   }
 };
 
+exports.updatePaymentStatus = async (req, res) => {
+  try {
+    const { uid } = req.params;
+    const { paymentStatus } = req.body;
+
+    if (!paymentStatus) {
+      return res.status(400).json({ message: 'Payment status is required.' });
+    }
+
+    if (!['Success', 'Pending', 'Failed', 'Refunded'].includes(paymentStatus)) {
+      return res.status(400).json({ message: 'Invalid payment status.' });
+    }
+
+    const updated = await Payment.findByIdAndUpdate(
+      uid,
+      addAuditOnUpdate(req, { paymentStatus }),
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: 'Payment not found.' });
+    }
+
+    res.json(updated);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
 exports.deletePayment = async (req, res) => {
   try {
     await Payment.findByIdAndUpdate(req.params.uid, addAuditOnUpdate(req, { isDeleted: true }));

@@ -15,6 +15,8 @@ const Payment = require('../models/Payment');
 const TalentPool = require('../models/TalentPool');
 const User = require('../models/User');
 const SupportTicket = require('../models/SupportTicket');
+const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
+const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
 
 const formatDate = (value) => {
   if (!value) return null;
@@ -31,6 +33,40 @@ const addDays = (date, days) => {
   const nextDate = new Date(date);
   nextDate.setDate(nextDate.getDate() + days);
   return nextDate;
+};
+
+const getNextPaymentId = async () => {
+  const lastPayment = await Payment.findOne({ paymentId: /^PAY-\d+$/ })
+    .sort({ createDate: -1 })
+    .select('paymentId');
+  const lastNumber = lastPayment ? Number(lastPayment.paymentId.replace('PAY-', '')) : 0;
+  return `PAY-${String(lastNumber + 1).padStart(3, '0')}`;
+};
+
+const getNextInvoiceNo = async () => {
+  const year = new Date().getFullYear();
+  const prefix = `INV-${year}-`;
+  const lastPayment = await Payment.findOne({ invoiceNo: new RegExp(`^${prefix}\\d+$`) })
+    .sort({ createDate: -1 })
+    .select('invoiceNo');
+  const lastNumber = lastPayment ? Number(lastPayment.invoiceNo.replace(prefix, '')) : 0;
+  return `${prefix}${String(lastNumber + 1).padStart(3, '0')}`;
+};
+
+const getPlanEndDate = (plan, startDate = new Date()) => {
+  if (plan?.endDate) return new Date(plan.endDate);
+
+  const validityDays = {
+    Weekly: 7,
+    Monthly: 30,
+    Quarterly: 90,
+    'Half-Yearly': 180,
+    Yearly: 365,
+    'One Time': 30,
+    'Always Free': 36500
+  };
+
+  return addDays(startDate, validityDays[plan?.planValidity] || 30);
 };
 
 const splitList = (value) => {
@@ -165,6 +201,10 @@ const ensureApplicationsExist = async (userId) => {
             gender: mc.gender,
             city: mc.city,
             state: mc.state,
+            country: 'India',
+            district: mc.city,
+            address: 'Not Specified',
+            pinCode: '560001',
             experience: mc.experience,
             expectedSalary: 'Rs. 4,00,000 - Rs. 8,00,000 Per Annum',
             qualification: qualGrad._id,
@@ -1424,6 +1464,8 @@ exports.updateEmployerProfile = async (req, res) => {
 exports.getEmployerSubscription = async (req, res) => {
   try {
     const userId = req.user._id;
+    await seedEmployerPlansIfEmpty();
+
     const employer = await Employer.findOne({
       $or: [{ userId }, { login: userId }],
       isDeleted: { $ne: true }
@@ -1470,6 +1512,7 @@ exports.getEmployerSubscription = async (req, res) => {
 
     res.json({
       subscription: {
+        currentPlanId: plan?._id || null,
         planName: plan?.planName || 'Free Plan',
         status: employer?.status === 'blacklist' ? 'Inactive' : 'Active',
         validUntil: employer?.planValidity || plan?.endDate || null,
@@ -1492,6 +1535,80 @@ exports.getEmployerSubscription = async (req, res) => {
       availablePlans,
       billingHistory
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.selectEmployerPlan = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { planId } = req.body;
+
+    if (!planId) {
+      return res.status(400).json({ message: 'Plan is required.' });
+    }
+
+    const [employer, plan] = await Promise.all([
+      Employer.findOne({
+        $or: [{ userId }, { login: userId }],
+        isDeleted: { $ne: true }
+      }).populate('userId', 'email').lean(),
+      Plan.findOne({
+        _id: planId,
+        category: 'Employer',
+        status: 'active',
+        isDeleted: { $ne: true }
+      }).lean()
+    ]);
+
+    if (!employer) {
+      return res.status(404).json({ message: 'Employer profile was not found.' });
+    }
+
+    if (!plan) {
+      return res.status(404).json({ message: 'Selected employer plan was not found or is inactive.' });
+    }
+
+    const validFrom = new Date();
+    const validTill = getPlanEndDate(plan, validFrom);
+    const amount = Number(plan.cost) || 0;
+
+    await Employer.findByIdAndUpdate(
+      employer._id,
+      addAuditOnUpdate(req, {
+        currentPlan: plan._id,
+        planValidity: validTill
+      })
+    );
+
+    await Payment.create(addAuditOnCreate(req, {
+      paymentId: await getNextPaymentId(),
+      invoiceNo: await getNextInvoiceNo(),
+      paymentDate: validFrom,
+      userType: 'Employer',
+      customer: employer._id,
+      customerModel: 'Employer',
+      customerName: employer.companyName || req.user.companyName || req.user.email,
+      email: employer.userId?.email || req.user.email,
+      phone: employer.phone || req.user.phone || '',
+      plan: plan._id,
+      planName: plan.planName,
+      planAmount: amount,
+      discount: 0,
+      paidAmount: amount,
+      paymentMethod: 'UPI',
+      paymentGateway: 'Razorpay',
+      gatewayTxnId: `EMP-${Date.now()}`,
+      paymentStatus: 'Success',
+      validityType: plan.planValidity,
+      validFrom,
+      validTill,
+      remarks: 'Employer selected plan from subscription page.',
+      recordedBy: 'Employer Portal'
+    }));
+
+    res.json({ message: `${plan.planName} activated successfully.` });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
