@@ -1,7 +1,45 @@
 const Plan = require('../models/Plan');
+const PlanMapping = require('../models/PlanMapping');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
 const { validateWholeNumber, caseInsensitiveExactFilter } = require('../utils/masterHelpers');
 const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
+
+const attachMappedFeatures = async (plans) => {
+  const planRows = plans.map(plan => (typeof plan.toObject === 'function' ? plan.toObject() : plan));
+  const planIds = planRows.map(plan => plan._id).filter(Boolean);
+  if (planIds.length === 0) return planRows;
+
+  const mappings = await PlanMapping.find({
+    plan: { $in: planIds },
+    isDeleted: { $ne: true },
+    status: { $ne: 'inactive' }
+  })
+    .populate('feature')
+    .lean();
+
+  const mappedByPlan = mappings.reduce((acc, mapping) => {
+    if (!mapping.feature || mapping.feature.isDeleted || mapping.feature.status === 'inactive') return acc;
+    const key = String(mapping.plan);
+    if (!acc[key]) acc[key] = [];
+    acc[key].push({
+      _id: mapping.feature._id,
+      featureName: mapping.feature.featureName,
+      displayOrder: mapping.feature.displayOrder || 0,
+      value: mapping.value || 'Yes'
+    });
+    return acc;
+  }, {});
+
+  return planRows.map(plan => {
+    const mappedFeatures = (mappedByPlan[String(plan._id)] || [])
+      .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
+    return {
+      ...plan,
+      mappedFeatures,
+      features: plan.features?.length ? plan.features : mappedFeatures
+    };
+  });
+};
 
 exports.getPlans = async (req, res) => {
   try {
@@ -35,9 +73,10 @@ exports.getPlans = async (req, res) => {
         .sort({ displayOrder: 1, cost: 1 })
         .skip(skip)
         .limit(limitNum);
+      const docsWithFeatures = await attachMappedFeatures(docs);
 
       return res.json({
-        docs,
+        docs: docsWithFeatures,
         total,
         page: pageNum,
         limit: limitNum,
@@ -49,7 +88,8 @@ exports.getPlans = async (req, res) => {
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
         .sort({ planName: 1, cost: 1 });
-      res.json(list);
+      const listWithFeatures = await attachMappedFeatures(list);
+      res.json(listWithFeatures);
     }
   } catch (error) {
     res.status(500).json({ message: error.message });

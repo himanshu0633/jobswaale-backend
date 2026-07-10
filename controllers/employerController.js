@@ -1,8 +1,155 @@
 const Employer = require('../models/Employer');
 const User = require('../models/User');
+const Job = require('../models/Job');
+const mongoose = require('mongoose');
 const { validateMobileNumber, findDuplicateMobile } = require('../utils/userCredentials');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
+
+const getLocation = (item) => (
+  [item.city, item.state, item.country].filter(Boolean).join(', ') || 'Location not specified'
+);
+
+exports.getPublicEmployers = async (req, res) => {
+  try {
+    const list = await Employer.find({
+      isDeleted: { $ne: true },
+      status: 'active'
+    })
+      .populate('userId', 'email role status')
+      .populate('industryType')
+      .sort({ createDate: -1 })
+      .lean();
+
+    const loginIds = list.map((item) => item.login || item.userId?._id || item.userId).filter(Boolean);
+    const companyNames = list.map((item) => item.companyName).filter(Boolean);
+    const [jobCounts, companyJobCounts] = await Promise.all([
+      Job.aggregate([
+        {
+          $match: {
+            login: { $in: loginIds },
+            isDeleted: { $ne: true },
+            status: { $in: ['active', 'featured'] }
+          }
+        },
+        { $group: { _id: '$login', count: { $sum: 1 } } }
+      ]),
+      Job.aggregate([
+        {
+          $match: {
+            companyName: { $in: companyNames },
+            isDeleted: { $ne: true },
+            status: { $in: ['active', 'featured'] }
+          }
+        },
+        { $group: { _id: '$companyName', count: { $sum: 1 } } }
+      ])
+    ]);
+    const jobCountMap = jobCounts.reduce((acc, item) => {
+      acc[String(item._id)] = item.count;
+      return acc;
+    }, {});
+    const companyJobCountMap = companyJobCounts.reduce((acc, item) => {
+      acc[String(item._id)] = item.count;
+      return acc;
+    }, {});
+
+    const employers = list.map((item) => {
+      const loginId = String(item.login || item.userId?._id || item.userId || '');
+      return {
+        id: item._id,
+        name: item.companyName || 'Employer',
+        location: getLocation(item),
+        industry: item.industryType?.industryType || item.companyType || 'General',
+        openJobs: jobCountMap[loginId] || companyJobCountMap[item.companyName] || 0,
+        rating: Number(item.rating || 4.2),
+        ratesCount: Number(item.profileViews || 0),
+        logoImg: item.logo || '',
+        online: item.isVerified === true,
+        createdAt: item.createDate
+      };
+    });
+
+    res.json(employers);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getPublicEmployerDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ message: 'Employer not found' });
+    }
+
+    const employer = await Employer.findOne({
+      _id: id,
+      isDeleted: { $ne: true },
+      status: 'active'
+    })
+      .populate('userId', 'email role status')
+      .populate('industryType')
+      .lean();
+
+    if (!employer) {
+      return res.status(404).json({ message: 'Employer not found' });
+    }
+
+    const loginIds = [employer.login, employer.userId?._id, employer.userId]
+      .filter(Boolean)
+      .map((item) => item);
+
+    const jobs = await Job.find({
+      isDeleted: { $ne: true },
+      status: { $in: ['active', 'featured'] },
+      $or: [
+        { login: { $in: loginIds } },
+        { companyName: employer.companyName }
+      ]
+    })
+      .populate('jobCategory')
+      .populate('jobType')
+      .sort({ postingDate: -1, createDate: -1 })
+      .lean();
+
+    const location = getLocation(employer);
+    const industry = employer.industryType?.industryType || employer.companyType || 'General';
+
+    res.json({
+      id: employer._id,
+      name: employer.companyName || 'Employer',
+      location,
+      industry,
+      foundedYear: employer.foundedYear || null,
+      memberSince: employer.createDate,
+      contactPerson: employer.contactPerson || '',
+      website: employer.website || '',
+      description: employer.description || employer.bio || employer.tagline || '',
+      phone: employer.phone || '',
+      email: employer.userId?.email || employer.altEmail || '',
+      address: [employer.address, employer.city, employer.state, employer.country].filter(Boolean).join(', ') || location,
+      logoImg: employer.logo || '',
+      online: employer.isVerified === true,
+      rating: Number(employer.rating || 4.2),
+      ratesCount: Number(employer.profileViews || 0),
+      openJobs: jobs.length,
+      lastJobPostedAt: jobs[0]?.postingDate || jobs[0]?.createDate || null,
+      jobs: jobs.map((job) => ({
+        id: job.slug || job._id,
+        title: job.jobTitle,
+        company: job.companyName,
+        location: [job.city, job.state].filter(Boolean).join(', ') || (job.jobLocations || []).join(', ') || 'Location not specified',
+        salary: job.salary || (job.minSalary && job.maxSalary ? `₹${job.minSalary} - ${job.maxSalary}` : 'Not Specified'),
+        type: job.jobType?.jobType || job.workMode || 'Full Time',
+        category: job.jobCategory?.categoryName || '',
+        logoLetter: job.companyName ? job.companyName.charAt(0).toUpperCase() : 'J'
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
 exports.getEmployers = async (req, res) => {
   try {

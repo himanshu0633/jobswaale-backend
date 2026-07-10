@@ -35,6 +35,7 @@ const ensureJobseekerExists = async (userId) => {
       address: 'Not Specified',
       pinCode: '110001',
       qualification: qualGrad._id,
+      currentPlan: user?.selectedPlan || null,
       experience: user?.workStatus || 'Fresher',
       status: 'active'
     });

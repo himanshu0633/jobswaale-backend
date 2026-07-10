@@ -213,6 +213,7 @@ exports.getJobById = async (req, res) => {
   try {
     const { id } = req.params;
     const mongoose = require('mongoose');
+    const jwt = require('jsonwebtoken');
 
     const query = mongoose.Types.ObjectId.isValid(id)
       ? { $or: [{ _id: id }, { slug: id }], isDeleted: { $ne: true } }
@@ -258,16 +259,40 @@ exports.getJobById = async (req, res) => {
       skills: jobDoc.skills && jobDoc.skills.length > 0 ? jobDoc.skills : ['Communication', 'Team Work']
     };
 
+    const Employer = require('../models/Employer');
+    const employerDoc = await Employer.findOne({
+      $or: [{ userId: jobDoc.login }, { login: jobDoc.login }],
+      isDeleted: { $ne: true }
+    }).select('_id').lean();
+
     const companyFormatted = {
+      id: employerDoc?._id || null,
       name: jobDoc.companyName,
       logo: jobDoc.companyName ? jobDoc.companyName.charAt(0) : 'J',
       website: '',
       about: jobDoc.aboutCompany || `${jobDoc.companyName} is a leading provider in their industry.`
     };
 
+    let hasApplied = false;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
+        const seeker = await Jobseeker.findOne({ userId: decoded.id }).select('_id').lean();
+        if (seeker) {
+          const existing = await Application.exists({ job: jobDoc._id, candidate: seeker._id });
+          hasApplied = Boolean(existing);
+        }
+      } catch {
+        hasApplied = false;
+      }
+    }
+
     res.json({
       job: jobFormatted,
-      company: companyFormatted
+      company: companyFormatted,
+      hasApplied
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

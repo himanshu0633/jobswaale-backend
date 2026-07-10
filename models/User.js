@@ -51,6 +51,11 @@ const UserSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  selectedPlan: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Plan',
+    default: null
+  },
   email: {
     type: String,
     required: true,

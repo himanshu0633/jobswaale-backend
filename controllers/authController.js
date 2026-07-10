@@ -1,10 +1,12 @@
 const User = require('../models/User');
 const Employer = require('../models/Employer');
+const Plan = require('../models/Plan');
 const jwt = require('jsonwebtoken');
 const { allPermissions } = require('../utils/permissions');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
 const { isSuperAdminAccount } = require('../middleware/auth');
+const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
 
 // Helper to generate JWT token
 const generateToken = (id, expiresIn = '30d') => {
@@ -19,6 +21,43 @@ const getBlacklistedEmployer = async (userId) => {
     isDeleted: { $ne: true },
     status: 'blacklist'
   }).select('blacklistReason companyName').lean();
+};
+
+const getDefaultFreePlan = async (category) => {
+  if (category === 'Employer') {
+    await seedEmployerPlansIfEmpty();
+  }
+
+  const existingPlan = await Plan.findOne({
+    category,
+    cost: 0,
+    isDeleted: { $ne: true },
+    status: { $ne: 'inactive' }
+  }).sort({ displayOrder: 1, createDate: 1 }).select('_id planName').lean();
+  if (existingPlan) return existingPlan;
+
+  const admin = await User.findOne({ role: 'Admin', isDeleted: { $ne: true } }).sort({ createDate: 1 }).select('_id');
+  if (!admin) return null;
+
+  const createdPlan = await Plan.create({
+    category,
+    planName: 'Free',
+    planSubtitle: category === 'Employer' ? 'Start hiring with your first free job post' : 'Start your journey with us',
+    cost: 0,
+    planValidity: 'Always Free',
+    planType: 'Free',
+    displayOrder: 0,
+    unlockCount: '0',
+    freeJobPosts: category === 'Employer' ? 1 : 0,
+    showBadge: true,
+    badge: 'FREE',
+    employerFeatures: category === 'Employer' ? ['Employer Dashboard', 'First Job Post Free'] : [],
+    status: 'active',
+    login: admin._id,
+    ip: '127.0.0.1'
+  });
+
+  return { _id: createdPlan._id, planName: createdPlan.planName };
 };
 
 // @desc    Register a new user (Jobseeker/Employer only)
@@ -73,12 +112,16 @@ exports.register = async (req, res) => {
     const nameParts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
     const firstName = nameParts.shift() || '';
     const lastName = nameParts.join(' ');
+    const defaultPlan = await getDefaultFreePlan(role);
+    const selectedPlanId = defaultPlan?._id || null;
+    const selectedPlanName = defaultPlan?.planName || '';
 
     const user = await User.create({
       firstName,
       lastName,
       phone: String(phone || '').trim(),
       workStatus: role === 'Jobseeker' ? String(workStatus || '').trim() : '',
+      selectedPlan: selectedPlanId,
       updatesConsent: updatesConsent !== false,
       companyName: role === 'Employer' ? String(companyName || '').trim() : '',
       designation: role === 'Employer' ? String(designation || '').trim() : '',
@@ -90,6 +133,20 @@ exports.register = async (req, res) => {
       accountType: role === 'Employer' ? 'employer' : 'jobseeker',
       status: 'active'
     });
+
+    if (role === 'Employer') {
+      await Employer.create({
+        userId: user._id,
+        login: user._id,
+        companyName: String(companyName || '').trim(),
+        contactPerson: String(fullName || '').trim(),
+        phone: String(phone || '').trim(),
+        companySize: String(companySize || '').trim(),
+        currentPlan: selectedPlanId,
+        status: 'active',
+        ip: req.clientIp || '127.0.0.1'
+      });
+    }
 
     await sendAdminNotification({
       enabled: role === 'Employer' ? settings.notifNewEmp : settings.notifNewApp,
@@ -103,9 +160,11 @@ exports.register = async (req, res) => {
           { label: 'Company', value: String(companyName || '').trim() || '-' },
           { label: 'Designation', value: String(designation || '').trim() || '-' },
           { label: 'Company Type', value: String(companyType || '').trim() || '-' },
-          { label: 'Company Size', value: String(companySize || '').trim() || '-' }
+          { label: 'Company Size', value: String(companySize || '').trim() || '-' },
+          { label: 'Default Plan', value: selectedPlanName || '-' }
         ] : [
-          { label: 'Work Status', value: String(workStatus || '').trim() || '-' }
+          { label: 'Work Status', value: String(workStatus || '').trim() || '-' },
+          { label: 'Default Plan', value: selectedPlanName || '-' }
         ]),
         { label: 'Role', value: role },
         { label: 'Status', value: user.status }
@@ -118,6 +177,7 @@ exports.register = async (req, res) => {
       lastName: user.lastName,
       phone: user.phone,
       workStatus: user.workStatus,
+      selectedPlan: user.selectedPlan,
       companyName: user.companyName,
       designation: user.designation,
       companyType: user.companyType,

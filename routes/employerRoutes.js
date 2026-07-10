@@ -3,6 +3,8 @@ const router = express.Router();
 const { protect, authorizeAdminPortal } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
 const {
+  getPublicEmployers,
+  getPublicEmployerDetail,
   getEmployers,
   createEmployer,
   updateEmployer,
@@ -11,6 +13,9 @@ const {
   verifyEmployer,
   unverifyEmployer
 } = require('../controllers/employerController');
+
+router.get('/public', getPublicEmployers);
+router.get('/public/:id', getPublicEmployerDetail);
 
 router.use(protect, authorizeAdminPortal);
 

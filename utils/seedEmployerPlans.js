@@ -4,6 +4,24 @@ const User = require('../models/User');
 const employerPlanSeeds = [
   {
     category: 'Employer',
+    planName: 'Free',
+    planSubtitle: 'Start hiring with your first free job post',
+    planType: 'Free',
+    planValidity: 'Always Free',
+    cost: 0,
+    unlockCount: '0',
+    freeJobPosts: 1,
+    showBadge: true,
+    badge: 'FREE',
+    employerFeatures: ['Employer Dashboard', 'First Job Post Free'],
+    offerEnabled: true,
+    offerTitle: 'FREE STARTER',
+    offerDescription: 'First Job Post Free',
+    displayOrder: 0,
+    status: 'active'
+  },
+  {
+    category: 'Employer',
     planName: 'Basic Weekly',
     planSubtitle: 'Best for small businesses',
     planType: 'Paid',

@@ -470,6 +470,95 @@ exports.getEmployerCandidates = async (req, res) => {
   }
 };
 
+exports.getEmployerCandidateProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const candidate = await Jobseeker.findOne({ _id: id, isDeleted: { $ne: true } })
+      .populate('userId', 'email phone firstName lastName')
+      .populate('qualification', 'name')
+      .populate('industryType', 'industryType name industryName')
+      .populate('jobCategory', 'categoryName')
+      .populate('jobType', 'jobType')
+      .populate('currentPlan', 'planName')
+      .lean();
+
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found.' });
+    }
+
+    const employerJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).select('_id jobTitle companyName jobType').populate('jobType', 'jobType').lean();
+    const employerJobIds = employerJobs.map(job => job._id);
+    const [application, talentPoolItem] = await Promise.all([
+      Application.findOne({ candidate: candidate._id, job: { $in: employerJobIds } }).populate('job', 'jobTitle companyName jobType').lean(),
+      TalentPool.findOne({ employerId: userId, candidateId: candidate._id, isDeleted: { $ne: true } }).lean()
+    ]);
+
+    if (!application && !talentPoolItem) {
+      return res.status(403).json({ message: 'You are not allowed to view this candidate profile.' });
+    }
+
+    const mapped = mapCandidate(candidate);
+    const skills = Array.isArray(candidate.skills) && candidate.skills.length
+      ? candidate.skills
+      : [candidate.jobCategory?.categoryName, candidate.jobType?.jobType, candidate.industryType?.industryType].filter(Boolean);
+    const salary = parseSalaryRange(candidate.expectedSalary);
+
+    res.json({
+      ...mapped,
+      phone: candidate.phone || candidate.userId?.phone || '',
+      designation: candidate.designation || mapped.role,
+      bio: candidate.bio || `Experienced ${mapped.role} profile with ${mapped.experience} experience.`,
+      expectedSalary: candidate.expectedSalary || 'Not specified',
+      currentSalary: salary.min ? `₹ ${salary.min} LPA` : 'Not specified',
+      noticePeriod: candidate.status === 'active' ? 'Immediate' : '30 Days',
+      relocate: candidate.relocate === 'no' ? 'No' : 'Yes',
+      linkedin: candidate.linkedin || '',
+      github: candidate.github || '',
+      portfolio: candidate.portfolio || '',
+      skills,
+      frontendSkills: skills.slice(0, 7),
+      backendSkills: skills.slice(7, 11),
+      toolSkills: ['Git', 'Figma', 'Jira'].filter(Boolean),
+      languages: ['English', 'Hindi'],
+      education: [{
+        degree: candidate.qualification?.name || candidate.studyField || 'Qualification not specified',
+        institution: candidate.university || 'Not specified',
+        year: candidate.passingYear || 'N/A',
+        grade: 'N/A'
+      }],
+      workExperience: [{
+        title: candidate.designation || mapped.role,
+        company: candidate.industryType?.industryType || candidate.industryType?.name || 'Previous Company',
+        location: mapped.location,
+        period: mapped.experience,
+        points: [
+          candidate.bio || 'Candidate profile details are available for employer review.',
+          skills.length ? `Key skills include ${skills.join(', ')}.` : 'Skills not specified.'
+        ]
+      }],
+      certifications: [
+        { title: `${mapped.role} Professional Profile`, issuer: 'JobsWaale', year: new Date().getFullYear() }
+      ],
+      application: application ? {
+        id: application._id,
+        status: application.status,
+        matchScore: application.matchScore || 0,
+        appliedDate: application.appliedDate || application.createDate,
+        jobTitle: application.job?.jobTitle || ''
+      } : null,
+      talentPool: talentPoolItem ? {
+        id: talentPoolItem._id,
+        category: talentPoolItem.category,
+        note: talentPoolItem.note
+      } : null
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getEmployerApplications = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -578,6 +667,106 @@ exports.getEmployerApplications = async (req, res) => {
       },
       applications: items,
       pagination
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getEmployerApplicationDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const application = await Application.findById(id)
+      .populate({
+        path: 'job',
+        populate: [
+          { path: 'jobType', select: 'jobType' },
+          { path: 'jobCategory', select: 'categoryName' },
+          { path: 'qualification', select: 'name' }
+        ]
+      })
+      .populate({
+        path: 'candidate',
+        populate: [
+          { path: 'userId', select: 'email phone firstName lastName' },
+          { path: 'qualification', select: 'name' },
+          { path: 'jobCategory', select: 'categoryName' },
+          { path: 'jobType', select: 'jobType' },
+          { path: 'industryType', select: 'industryType' }
+        ]
+      })
+      .lean();
+
+    if (!application || !application.job || !application.candidate) {
+      return res.status(404).json({ message: 'Application not found.' });
+    }
+
+    if (String(application.job.login) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'You are not allowed to view this application.' });
+    }
+
+    const candidate = application.candidate;
+    const job = application.job;
+    const appliedDate = application.appliedDate || application.createDate || new Date();
+    const salaryRange = parseSalaryRange(candidate.expectedSalary || job.salary || '');
+    const skills = Array.isArray(candidate.skills) && candidate.skills.length
+      ? candidate.skills
+      : [job.jobCategory?.categoryName, job.jobType?.jobType, candidate.experience].filter(Boolean);
+
+    res.json({
+      id: application._id,
+      status: application.status,
+      matchScore: application.matchScore || 0,
+      appliedDate,
+      appliedDisplayDate: formatDisplayDate(appliedDate),
+      shortlistedDate: application.shortlistedDate || null,
+      interviewDetails: application.interviewDetails || null,
+      selectionDetails: application.selectionDetails || null,
+      candidate: {
+        id: candidate._id,
+        name: candidate.name,
+        email: candidate.userId?.email || '',
+        phone: candidate.phone || candidate.userId?.phone || '',
+        initials: getInitials(candidate.name).toUpperCase(),
+        designation: candidate.designation || candidate.jobCategory?.categoryName || job.jobTitle || 'Candidate',
+        location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
+        experience: candidate.experience || 'Fresher',
+        qualification: candidate.qualification?.name || 'Not specified',
+        industry: candidate.industryType?.industryType || '',
+        expectedSalary: candidate.expectedSalary || 'Not specified',
+        currentSalary: salaryRange.min ? `₹ ${salaryRange.min} LPA` : 'Not specified',
+        noticePeriod: candidate.noticePeriod || 'Immediate',
+        relocate: candidate.relocate === 'no' ? 'No' : 'Yes',
+        resume: candidate.resume || '',
+        bio: candidate.bio || '',
+        skills,
+        education: [{
+          degree: candidate.qualification?.name || candidate.studyField || 'Qualification not specified',
+          institution: candidate.university || 'Not specified',
+          year: candidate.passingYear || 'N/A',
+          grade: 'N/A'
+        }],
+        workExperience: [{
+          title: candidate.designation || candidate.jobCategory?.categoryName || 'Candidate',
+          company: candidate.industryType?.industryType || 'Previous Company',
+          period: candidate.experience || 'N/A',
+          points: [
+            candidate.bio || 'Candidate profile details are available in the jobseeker profile.',
+            skills.length ? `Key skills: ${skills.join(', ')}` : 'Skills not specified.'
+          ]
+        }]
+      },
+      job: {
+        id: job._id,
+        title: job.jobTitle,
+        company: job.companyName,
+        type: job.jobType?.jobType || job.workMode || 'Full Time',
+        category: job.jobCategory?.categoryName || '',
+        experience: job.experience || '',
+        salary: job.salary || (job.minSalary && job.maxSalary ? `₹${job.minSalary} - ${job.maxSalary}` : 'Not specified'),
+        location: [job.city, job.state].filter(Boolean).join(', ') || 'N/A'
+      }
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -1132,13 +1321,16 @@ exports.getEmployerDashboard = async (req, res) => {
       .lean();
 
     const allJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).lean();
+    const defaultPlan = !employer?.currentPlan && req.user.selectedPlan
+      ? await Plan.findById(req.user.selectedPlan).lean()
+      : null;
     const expiringJobs = allJobs.filter(job => {
       const remainingDays = daysFromNow(job.jobExpiry || job.planValidity);
       return remainingDays !== null && remainingDays >= 0 && remainingDays <= 7;
     });
 
-    const plan = employer?.currentPlan || jobs.find(job => job.currentPlan)?.currentPlan || null;
-    const planLimit = Number(plan?.freeJobPosts || 50);
+    const plan = employer?.currentPlan || defaultPlan || jobs.find(job => job.currentPlan)?.currentPlan || null;
+    const planLimit = Number(plan?.freeJobPosts || 0);
     const jobsUsed = allJobs.length;
     const remainingCredits = Math.max(planLimit - jobsUsed, 0);
     const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
@@ -1289,7 +1481,11 @@ exports.getEmployerProfile = async (req, res) => {
     const hiredCount = await Application.countDocuments({ job: { $in: jobIds }, status: 'Offered' });
 
     const plan = employer?.currentPlan || null;
-    const planLimit = Number(plan?.freeJobPosts || 50);
+    const defaultPlan = !plan && req.user.selectedPlan
+      ? await Plan.findById(req.user.selectedPlan).lean()
+      : null;
+    const effectivePlan = plan || defaultPlan;
+    const planLimit = Number(effectivePlan?.freeJobPosts || 0);
     const jobsUsed = allJobs.length;
     const remainingCredits = Math.max(planLimit - jobsUsed, 0);
     const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
@@ -1479,7 +1675,11 @@ exports.getEmployerSubscription = async (req, res) => {
     const teamMembersCount = employer?.teamMembers?.length || 1;
 
     const plan = employer?.currentPlan || null;
-    const planLimit = Number(plan?.freeJobPosts || 50);
+    const defaultPlan = !plan && req.user.selectedPlan
+      ? await Plan.findById(req.user.selectedPlan).lean()
+      : null;
+    const effectivePlan = plan || defaultPlan;
+    const planLimit = Number(effectivePlan?.freeJobPosts || 0);
     const jobsUsed = allJobs.length;
     const remainingCredits = Math.max(planLimit - jobsUsed, 0);
     const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
@@ -1488,8 +1688,8 @@ exports.getEmployerSubscription = async (req, res) => {
     if (employer?.planValidity) {
       const diffMs = new Date(employer.planValidity).getTime() - Date.now();
       daysRemaining = Math.max(Math.ceil(diffMs / (1000 * 60 * 60 * 24)), 0);
-    } else if (plan?.endDate) {
-      const diffMs = new Date(plan.endDate).getTime() - Date.now();
+    } else if (effectivePlan?.endDate) {
+      const diffMs = new Date(effectivePlan.endDate).getTime() - Date.now();
       daysRemaining = Math.max(Math.ceil(diffMs / (1000 * 60 * 60 * 24)), 0);
     }
 
@@ -1512,10 +1712,10 @@ exports.getEmployerSubscription = async (req, res) => {
 
     res.json({
       subscription: {
-        currentPlanId: plan?._id || null,
-        planName: plan?.planName || 'Free Plan',
+        currentPlanId: effectivePlan?._id || null,
+        planName: effectivePlan?.planName || 'Free Plan',
         status: employer?.status === 'blacklist' ? 'Inactive' : 'Active',
-        validUntil: employer?.planValidity || plan?.endDate || null,
+        validUntil: employer?.planValidity || effectivePlan?.endDate || null,
         jobsUsed,
         jobLimit: planLimit,
         remainingCredits,
@@ -1641,7 +1841,7 @@ exports.getEmployerJobForm = async (req, res) => {
         state: employer.state,
         district: employer.district,
         city: employer.city,
-        currentPlan: employer.currentPlan?._id || employer.currentPlan || null,
+        currentPlan: employer.currentPlan?._id || employer.currentPlan || req.user.selectedPlan || null,
         planValidity: formatDate(employer.planValidity)
       } : {
         companyName: req.user.companyName || '',
@@ -1652,7 +1852,7 @@ exports.getEmployerJobForm = async (req, res) => {
         state: '',
         district: '',
         city: '',
-        currentPlan: null,
+        currentPlan: req.user.selectedPlan || null,
         planValidity: null
       },
       countries: countries.map(item => ({ id: item._id, cid: item.cid, name: item.countryName })),
@@ -1914,6 +2114,21 @@ exports.createEmployerJob = async (req, res) => {
   try {
     const userId = req.user._id;
     const employer = await Employer.findOne({ $or: [{ userId }, { login: userId }], isDeleted: { $ne: true } });
+    const planId = employer?.currentPlan || req.user.selectedPlan || null;
+    const activePlan = planId ? await Plan.findOne({
+      _id: planId,
+      isDeleted: { $ne: true },
+      status: { $ne: 'inactive' }
+    }).lean() : null;
+    if (activePlan) {
+      const planLimit = Number(activePlan.freeJobPosts || 0);
+      const jobsUsed = await Job.countDocuments({ login: userId, isDeleted: { $ne: true } });
+      if (jobsUsed >= planLimit) {
+        return res.status(403).json({
+          message: `Your ${activePlan.planName} plan allows ${planLimit} job post${planLimit === 1 ? '' : 's'}. Please upgrade your plan to post more jobs.`
+        });
+      }
+    }
     const {
       jobTitle,
       jobCategory,
@@ -2012,7 +2227,7 @@ exports.createEmployerJob = async (req, res) => {
       contactPerson: contactPerson || employer?.contactPerson || `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
       email: email || req.user.email,
       phone: phone || employer?.phone || req.user.phone || 'N/A',
-      currentPlan: currentPlan || employer?.currentPlan || null,
+      currentPlan: currentPlan || employer?.currentPlan || req.user.selectedPlan || null,
       planValidity: planValidity || jobExpiry || employer?.planValidity || null,
       status: finalPublishStatus === 'draft' ? 'pending' : 'active',
       ip: req.clientIp || '127.0.0.1',
@@ -2474,7 +2689,8 @@ exports.getEmployerSettings = async (req, res) => {
         userId,
         login: userId,
         companyName: req.user.companyName || 'TechCorp India',
-        phone: req.user.phone || '9876543210'
+        phone: req.user.phone || '9876543210',
+        currentPlan: req.user.selectedPlan || null
       });
     }
 
@@ -2539,7 +2755,8 @@ exports.updateEmployerSettings = async (req, res) => {
         userId,
         login: userId,
         companyName: req.user.companyName || 'TechCorp India',
-        phone: req.user.phone || '9876543210'
+        phone: req.user.phone || '9876543210',
+        currentPlan: req.user.selectedPlan || null
       });
     }
 
