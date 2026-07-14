@@ -12,6 +12,10 @@ const {
   deleteBlog
 } = require('../controllers/blogController');
 
+
+
+
+
 router.get('/public/blogs', getPublicBlogs);
 router.get('/public/blogs/:slug', getPublicBlogBySlug);
 
