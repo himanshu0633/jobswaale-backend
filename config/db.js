@@ -3,6 +3,10 @@ const mongoose = require('mongoose');
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/jobswaale';
 
+  if (mongoose.connection.readyState >= 1) {
+    return;
+  }
+
   try {
     const conn = await mongoose.connect(mongoUri, {
       serverSelectionTimeoutMS: Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 10000,

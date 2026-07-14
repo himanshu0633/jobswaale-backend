@@ -154,6 +154,10 @@ const JobseekerSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Job'
   }],
+  savedEmployers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Employer'
+  }],
   isDeleted: {
     type: Boolean,
     default: false

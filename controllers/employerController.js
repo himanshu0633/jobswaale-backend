@@ -54,6 +54,23 @@ exports.getPublicEmployers = async (req, res) => {
       return acc;
     }, {});
 
+    let savedEmployerIds = [];
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const jwt = require('jsonwebtoken');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
+        const Jobseeker = require('../models/Jobseeker');
+        const seeker = await Jobseeker.findOne({ userId: decoded.id }).select('savedEmployers').lean();
+        if (seeker && seeker.savedEmployers) {
+          savedEmployerIds = seeker.savedEmployers.map(id => id.toString());
+        }
+      } catch (err) {
+        console.error('Check saved status in getPublicEmployers error:', err);
+      }
+    }
+
     const employers = list.map((item) => {
       const loginId = String(item.login || item.userId?._id || item.userId || '');
       return {
@@ -66,7 +83,8 @@ exports.getPublicEmployers = async (req, res) => {
         ratesCount: Number(item.profileViews || 0),
         logoImg: item.logo || '',
         online: item.isVerified === true,
-        createdAt: item.createDate
+        createdAt: item.createDate,
+        hasSaved: savedEmployerIds.includes(item._id.toString())
       };
     });
 
@@ -116,6 +134,24 @@ exports.getPublicEmployerDetail = async (req, res) => {
     const location = getLocation(employer);
     const industry = employer.industryType?.industryType || employer.companyType || 'General';
 
+    let hasSaved = false;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const jwt = require('jsonwebtoken');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
+        const Jobseeker = require('../models/Jobseeker');
+        const seeker = await Jobseeker.findOne({ userId: decoded.id }).select('_id savedEmployers').lean();
+        if (seeker) {
+          hasSaved = seeker.savedEmployers && seeker.savedEmployers.map(id => id.toString()).includes(employer._id.toString());
+        }
+      } catch (err) {
+        console.error('Check saved employer status error:', err);
+        hasSaved = false;
+      }
+    }
+
     res.json({
       id: employer._id,
       name: employer.companyName || 'Employer',
@@ -144,7 +180,8 @@ exports.getPublicEmployerDetail = async (req, res) => {
         type: job.jobType?.jobType || job.workMode || 'Full Time',
         category: job.jobCategory?.categoryName || '',
         logoLetter: job.companyName ? job.companyName.charAt(0).toUpperCase() : 'J'
-      }))
+      })),
+      hasSaved: Boolean(hasSaved)
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

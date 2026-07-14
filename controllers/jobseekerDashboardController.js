@@ -11,6 +11,7 @@ const JobType = require('../models/JobType');
 const IndustryType = require('../models/IndustryType');
 const PlanMapping = require('../models/PlanMapping');
 const Feature = require('../models/Feature');
+const Employer = require('../models/Employer');
 
 // Helper to ensure a Jobseeker document exists for a user
 const ensureJobseekerExists = async (userId) => {
@@ -592,7 +593,25 @@ exports.getJobseekerSavedJobs = async (req, res) => {
       })
       .lean();
 
-    const saved = (populated.savedJobs || []).map((job, index) => {
+    // Deduplicate jobs on the fly and clean up database if duplicates exist
+    const uniqueJobs = [];
+    const jobIdsSeen = new Set();
+    const cleanSavedJobsIds = [];
+    for (const job of (populated.savedJobs || [])) {
+      if (!job) continue;
+      const jobStrId = String(job._id);
+      if (!jobIdsSeen.has(jobStrId)) {
+        jobIdsSeen.add(jobStrId);
+        uniqueJobs.push(job);
+        cleanSavedJobsIds.push(job._id);
+      }
+    }
+
+    if (populated.savedJobs && cleanSavedJobsIds.length < populated.savedJobs.length) {
+      await Jobseeker.findByIdAndUpdate(seeker._id, { savedJobs: cleanSavedJobsIds });
+    }
+
+    const saved = uniqueJobs.map((job, index) => {
       const colors = ['bg-[#0d6efd] text-white', 'bg-[#198754] text-white', 'bg-[#ffc107] text-[#212529]', 'bg-[#dc3545] text-white'];
       return {
         id: job.slug || job._id,
@@ -631,7 +650,11 @@ exports.toggleSaveJob = async (req, res) => {
       return res.status(404).json({ message: 'Job not found' });
     }
 
-    const index = seeker.savedJobs.indexOf(job._id);
+    if (!seeker.savedJobs) {
+      seeker.savedJobs = [];
+    }
+
+    const index = seeker.savedJobs.findIndex(id => id && id.toString() === job._id.toString());
     let saved = false;
     if (index === -1) {
       seeker.savedJobs.push(job._id);
@@ -645,5 +668,96 @@ exports.toggleSaveJob = async (req, res) => {
   } catch (error) {
     console.error('Toggle Save Job Error:', error);
     res.status(500).json({ message: 'Server error saving job' });
+  }
+};
+
+// 9. Saved Employers
+exports.getJobseekerSavedEmployers = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const seeker = await ensureJobseekerExists(userId);
+
+    const populated = await Jobseeker.findById(seeker._id)
+      .populate({
+        path: 'savedEmployers',
+        populate: { path: 'industryType' }
+      })
+      .lean();
+
+    // Deduplicate employers on the fly and clean up database if duplicates exist
+    const uniqueEmployers = [];
+    const empIdsSeen = new Set();
+    const cleanSavedEmployersIds = [];
+    for (const employer of (populated.savedEmployers || [])) {
+      if (!employer) continue;
+      const empStrId = String(employer._id);
+      if (!empIdsSeen.has(empStrId)) {
+        empIdsSeen.add(empStrId);
+        uniqueEmployers.push(employer);
+        cleanSavedEmployersIds.push(employer._id);
+      }
+    }
+
+    if (populated.savedEmployers && cleanSavedEmployersIds.length < populated.savedEmployers.length) {
+      await Jobseeker.findByIdAndUpdate(seeker._id, { savedEmployers: cleanSavedEmployersIds });
+    }
+
+    const saved = uniqueEmployers.map((employer, index) => {
+      const colors = ['bg-[#0d6efd] text-white', 'bg-[#198754] text-white', 'bg-[#ffc107] text-[#212529]', 'bg-[#dc3545] text-white'];
+      return {
+        id: employer._id,
+        rawId: employer._id,
+        name: employer.companyName || 'Employer',
+        initial: employer.companyName?.charAt(0).toUpperCase() || 'C',
+        tone: colors[index % colors.length],
+        location: [employer.city, employer.state].filter(Boolean).join(', ') || 'N/A',
+        industry: employer.industryType?.industryType || employer.companyType || 'General',
+        website: employer.website || '',
+        logoImg: employer.logo || '',
+        phone: employer.phone || ''
+      };
+    });
+
+    res.json(saved);
+  } catch (error) {
+    console.error('Get Saved Employers Error:', error);
+    res.status(500).json({ message: 'Server error loading saved employers list' });
+  }
+};
+
+// 10. Toggle Save Employer
+exports.toggleSaveEmployer = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { employerId } = req.params;
+
+    const query = mongoose.Types.ObjectId.isValid(employerId)
+      ? { _id: employerId, isDeleted: { $ne: true } }
+      : { companyName: employerId, isDeleted: { $ne: true } };
+
+    const seeker = await ensureJobseekerExists(userId);
+    const employerDoc = await Employer.findOne(query);
+    if (!employerDoc) {
+      return res.status(404).json({ message: 'Employer not found' });
+    }
+
+    if (!seeker.savedEmployers) {
+      seeker.savedEmployers = [];
+    }
+
+    const index = seeker.savedEmployers.findIndex(id => id && id.toString() === employerDoc._id.toString());
+    let saved = false;
+    if (index === -1) {
+      seeker.savedEmployers.push(employerDoc._id);
+      saved = true;
+    } else {
+      seeker.savedEmployers.splice(index, 1);
+    }
+
+    await seeker.save();
+    res.json({ message: saved ? 'Employer saved' : 'Employer unsaved', saved });
+  } catch (error) {
+    console.error('Toggle Save Employer Error:', error);
+    res.status(500).json({ message: 'Server error saving employer' });
   }
 };

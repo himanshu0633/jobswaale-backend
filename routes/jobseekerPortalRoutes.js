@@ -9,7 +9,9 @@ const {
   selectJobseekerPlan,
   getJobseekerApplications,
   getJobseekerSavedJobs,
-  toggleSaveJob
+  toggleSaveJob,
+  getJobseekerSavedEmployers,
+  toggleSaveEmployer
 } = require('../controllers/jobseekerDashboardController');
 
 // Middleware to ensure the user is a Jobseeker
@@ -33,5 +35,7 @@ router.post('/subscription/select-plan', selectJobseekerPlan);
 router.get('/applications', getJobseekerApplications);
 router.get('/saved-jobs', getJobseekerSavedJobs);
 router.post('/saved-jobs/:jobId/toggle', toggleSaveJob);
+router.get('/saved-employers', getJobseekerSavedEmployers);
+router.post('/saved-employers/:employerId/toggle', toggleSaveEmployer);
 
 module.exports = router;

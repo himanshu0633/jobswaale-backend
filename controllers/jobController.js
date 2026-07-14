@@ -274,25 +274,29 @@ exports.getJobById = async (req, res) => {
     };
 
     let hasApplied = false;
+    let hasSaved = false;
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
-        const seeker = await Jobseeker.findOne({ userId: decoded.id }).select('_id').lean();
+        const seeker = await Jobseeker.findOne({ userId: decoded.id }).select('_id savedJobs').lean();
         if (seeker) {
           const existing = await Application.exists({ job: jobDoc._id, candidate: seeker._id });
           hasApplied = Boolean(existing);
+          hasSaved = seeker.savedJobs && seeker.savedJobs.map(id => id.toString()).includes(jobDoc._id.toString());
         }
       } catch {
         hasApplied = false;
+        hasSaved = false;
       }
     }
 
     res.json({
       job: jobFormatted,
       company: companyFormatted,
-      hasApplied
+      hasApplied,
+      hasSaved: Boolean(hasSaved)
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
