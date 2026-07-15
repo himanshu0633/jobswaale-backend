@@ -13,18 +13,18 @@ const JobseekerSchema = new mongoose.Schema({
   },
   phone: {
     type: String,
-    required: true,
+    default: '',
     trim: true
   },
   gender: {
     type: String,
-    enum: ['Male', 'Female', 'Other'],
-    required: true
+    enum: ['', 'Male', 'Female', 'Other'],
+    default: ''
   },
   qualification: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Qualification',
-    required: true
+    default: null
   },
   industryType: {
     type: mongoose.Schema.Types.ObjectId,
@@ -40,7 +40,7 @@ const JobseekerSchema = new mongoose.Schema({
   },
   experience: {
     type: String,
-    required: true
+    default: ''
   },
   expectedSalary: {
     type: String
@@ -50,27 +50,27 @@ const JobseekerSchema = new mongoose.Schema({
   },
   country: {
     type: String,
-    required: true
+    default: ''
   },
   state: {
     type: String,
-    required: true
+    default: ''
   },
   district: {
     type: String,
-    required: true
+    default: ''
   },
   city: {
     type: String,
-    required: true
+    default: ''
   },
   address: {
     type: String,
-    required: true
+    default: ''
   },
   pinCode: {
     type: String,
-    required: true
+    default: ''
   },
   currentPlan: {
     type: mongoose.Schema.Types.ObjectId,

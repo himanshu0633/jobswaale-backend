@@ -13,31 +13,53 @@ const PlanMapping = require('../models/PlanMapping');
 const Feature = require('../models/Feature');
 const Employer = require('../models/Employer');
 
+const GOOGLE_PROFILE_DUMMY_VALUES = {
+  phone: 'Not Specified',
+  gender: 'Male',
+  city: 'Delhi',
+  state: 'Delhi',
+  country: 'India',
+  district: 'Delhi',
+  address: 'Not Specified',
+  pinCode: '110001',
+  experience: 'Fresher'
+};
+
+const clearGoogleDummyProfileValues = (seeker) => {
+  const user = seeker?.userId;
+  const isGoogleUser = Boolean(user?.providers?.googleId);
+  if (!isGoogleUser) return seeker;
+
+  Object.entries(GOOGLE_PROFILE_DUMMY_VALUES).forEach(([field, dummyValue]) => {
+    if (seeker[field] === dummyValue) {
+      seeker[field] = '';
+    }
+  });
+
+  return seeker;
+};
+
 // Helper to ensure a Jobseeker document exists for a user
 const ensureJobseekerExists = async (userId) => {
   let seeker = await Jobseeker.findOne({ userId });
   if (!seeker) {
     const user = await User.findById(userId);
-    let qualGrad = await Qualification.findOne();
-    if (!qualGrad) {
-      qualGrad = await Qualification.create({ name: 'Graduate' });
-    }
     
     seeker = await Jobseeker.create({
       userId: userId,
       login: userId,
       name: user ? `${user.firstName} ${user.lastName}`.trim() : 'Anonymous',
-      phone: user?.phone || 'Not Specified',
-      gender: 'Male',
-      city: 'Delhi',
-      state: 'Delhi',
-      country: 'India',
-      district: 'Delhi',
-      address: 'Not Specified',
-      pinCode: '110001',
-      qualification: qualGrad._id,
+      phone: user?.phone || '',
+      gender: '',
+      city: '',
+      state: '',
+      country: '',
+      district: '',
+      address: '',
+      pinCode: '',
+      qualification: null,
       currentPlan: user?.selectedPlan || null,
-      experience: user?.workStatus || 'Fresher',
+      experience: user?.workStatus || '',
       status: 'active'
     });
   }
@@ -264,7 +286,7 @@ exports.getJobseekerProfile = async (req, res) => {
 
     // Populate references if available
     const populatedSeeker = await Jobseeker.findById(seeker._id)
-      .populate('userId', 'email firstName lastName phone role accountType status')
+      .populate('userId', 'email firstName lastName phone role accountType status providers')
       .populate('qualification', 'name')
       .populate('jobCategory', 'categoryName')
       .populate('jobType', 'jobType')
@@ -272,7 +294,7 @@ exports.getJobseekerProfile = async (req, res) => {
       .populate('currentPlan', 'planName cost planValidity planType category')
       .lean();
 
-    res.json(populatedSeeker);
+    res.json(clearGoogleDummyProfileValues(populatedSeeker));
   } catch (error) {
     console.error('Get Jobseeker Profile Error:', error);
     res.status(500).json({ message: 'Server error loading profile details' });
@@ -321,22 +343,25 @@ exports.updateJobseekerProfile = async (req, res) => {
       const nameParts = name.trim().split(/\s+/);
       const firstName = nameParts.shift() || '';
       const lastName = nameParts.join(' ');
-      await User.findByIdAndUpdate(userId, { firstName, lastName, phone });
+      await User.findByIdAndUpdate(userId, { firstName, lastName });
     }
 
     // Assign fields
-    if (phone) seeker.phone = phone;
-    if (gender) seeker.gender = gender;
+    if (phone !== undefined) {
+      seeker.phone = phone;
+      await User.findByIdAndUpdate(userId, { phone });
+    }
+    if (gender !== undefined) seeker.gender = gender;
     if (dob !== undefined) seeker.dob = dob;
-    if (city) seeker.city = city;
-    if (state) seeker.state = state;
-    if (country) seeker.country = country;
-    if (district) seeker.district = district;
-    if (address) seeker.address = address;
-    if (pinCode) seeker.pinCode = pinCode;
+    if (city !== undefined) seeker.city = city;
+    if (state !== undefined) seeker.state = state;
+    if (country !== undefined) seeker.country = country;
+    if (district !== undefined) seeker.district = district;
+    if (address !== undefined) seeker.address = address;
+    if (pinCode !== undefined) seeker.pinCode = pinCode;
     if (designation !== undefined) seeker.designation = designation;
     if (relocate !== undefined) seeker.relocate = relocate;
-    if (experience) seeker.experience = experience;
+    if (experience !== undefined) seeker.experience = experience;
     if (expectedSalary !== undefined) seeker.expectedSalary = expectedSalary;
     if (preferredLocation !== undefined) seeker.preferredLocation = preferredLocation;
     if (bio !== undefined) seeker.bio = bio;

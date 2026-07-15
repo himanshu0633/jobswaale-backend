@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { register, login, seedAdmin, createAdmin, forgotPassword } = require('../controllers/authController');
+const { register, login, googleLogin, seedAdmin, createAdmin, forgotPassword } = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/auth');
 
 router.post('/register', register);
 router.post('/login', login);
+router.post('/google', googleLogin);
 router.post('/superadmin-login', (req, res, next) => {
   req.superAdminOnly = true;
   next();

@@ -51,6 +51,18 @@ const UserSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  profileImage: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  providers: {
+    googleId: {
+      type: String,
+      trim: true,
+      default: ''
+    }
+  },
   selectedPlan: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Plan',
@@ -126,6 +138,7 @@ const UserSchema = new mongoose.Schema({
 UserSchema.index({ role: 1 });
 UserSchema.index({ accountType: 1 });
 UserSchema.index({ isDeleted: 1 });
+UserSchema.index({ 'providers.googleId': 1 }, { sparse: true });
 
 // Hash password before saving
 UserSchema.pre('save', async function() {

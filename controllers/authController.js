@@ -2,6 +2,8 @@ const User = require('../models/User');
 const Employer = require('../models/Employer');
 const Plan = require('../models/Plan');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const { OAuth2Client } = require('google-auth-library');
 const { allPermissions } = require('../utils/permissions');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
@@ -58,6 +60,36 @@ const getDefaultFreePlan = async (category) => {
   });
 
   return { _id: createdPlan._id, planName: createdPlan.planName };
+};
+
+const getUserResponse = (user, rolePermissions = []) => ({
+  _id: user._id,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  username: user.username,
+  email: user.email,
+  role: user.role,
+  roleRef: user.roleRef?._id || null,
+  roleName: user.roleRef?.name || user.role,
+  accountType: user.accountType,
+  profileImage: user.profileImage,
+  permissions: rolePermissions
+});
+
+const verifyGoogleToken = async (token) => {
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+
+  if (!googleClientId) {
+    throw new Error('Google login is not configured');
+  }
+
+  const googleClient = new OAuth2Client(googleClientId);
+  const ticket = await googleClient.verifyIdToken({
+    idToken: token,
+    audience: googleClientId
+  });
+
+  return ticket.getPayload();
 };
 
 // @desc    Register a new user (Jobseeker/Employer only)
@@ -283,6 +315,142 @@ exports.login = async (req, res) => {
     });
   } catch (error) {
     console.error('Login Error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc    Auth user with Google ID token
+// @route   POST /api/auth/google
+// @access  Public
+exports.googleLogin = async (req, res) => {
+  try {
+    const { token, role = 'jobseeker' } = req.body;
+    const selectedAccountType = String(role || '').trim().toLowerCase();
+
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ message: 'Google ID token is required' });
+    }
+
+    if (!['jobseeker', 'employer'].includes(selectedAccountType)) {
+      return res.status(400).json({ message: 'Invalid account type selection' });
+    }
+
+    let payload;
+    try {
+      payload = await verifyGoogleToken(token);
+    } catch (error) {
+      const status = error.message === 'Google login is not configured' ? 500 : 401;
+      return res.status(status).json({ message: status === 500 ? error.message : 'Invalid Google token' });
+    }
+
+    const googleId = payload.sub;
+    const email = String(payload.email || '').trim().toLowerCase();
+    const emailVerified = payload.email_verified === true || payload.email_verified === 'true';
+    const name = String(payload.name || '').trim();
+    const profileImage = String(payload.picture || '').trim();
+
+    if (!googleId || !email || !emailVerified) {
+      return res.status(401).json({ message: 'Google account email could not be verified' });
+    }
+
+    let user = await User.findOne({
+      $or: [
+        { email },
+        { 'providers.googleId': googleId }
+      ]
+    }).populate('roleRef');
+
+    if (user?.providers?.googleId && user.providers.googleId !== googleId) {
+      return res.status(409).json({ message: 'This email is already linked to another Google account' });
+    }
+
+    if (user) {
+      const existingAccountType = String(user.accountType || user.role || '').trim().toLowerCase();
+      const existingRole = String(user.role || '').trim().toLowerCase();
+
+      if (
+        (selectedAccountType === 'jobseeker' && existingAccountType !== 'jobseeker' && existingRole !== 'jobseeker') ||
+        (selectedAccountType === 'employer' && existingAccountType !== 'employer' && existingRole !== 'employer')
+      ) {
+        return res.status(403).json({ message: 'Please select the correct account type for this login.' });
+      }
+
+      if (user.accountType === 'employer' || user.role === 'Employer') {
+        const blacklistedEmployer = await getBlacklistedEmployer(user._id);
+        if (blacklistedEmployer) {
+          const reason = String(blacklistedEmployer.blacklistReason || '').trim();
+          return res.status(403).json({
+            message: reason
+              ? `Your employer account has been blacklisted. Reason: ${reason}`
+              : 'Your employer account has been blacklisted. Please contact admin.',
+            accountStatus: 'blacklisted',
+            blacklistReason: reason,
+            companyName: blacklistedEmployer.companyName || ''
+          });
+        }
+      }
+
+      if (user.status !== 'active') {
+        return res.status(401).json({ message: 'User account is inactive' });
+      }
+
+      if (!user.providers) user.providers = {};
+      if (!user.providers.googleId) user.providers.googleId = googleId;
+      if (!user.profileImage && profileImage) user.profileImage = profileImage;
+      user.lastLogin = new Date();
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
+      await user.save();
+    } else {
+      const nameParts = name.split(/\s+/).filter(Boolean);
+      const firstName = nameParts.shift() || '';
+      const lastName = nameParts.join(' ');
+      const newRole = selectedAccountType === 'employer' ? 'Employer' : 'Jobseeker';
+      const defaultPlan = await getDefaultFreePlan(newRole);
+      const selectedPlanId = defaultPlan?._id || null;
+
+      user = await User.create({
+        firstName,
+        lastName,
+        email,
+        password: crypto.randomBytes(32).toString('hex'),
+        role: newRole,
+        accountType: selectedAccountType,
+        selectedPlan: selectedPlanId,
+        profileImage,
+        providers: { googleId },
+        status: 'active',
+        lastLogin: new Date()
+      });
+
+      if (selectedAccountType === 'employer') {
+        await Employer.create({
+          userId: user._id,
+          login: user._id,
+          companyName: name || email.split('@')[0],
+          contactPerson: name,
+          phone: 'Not provided',
+          currentPlan: selectedPlanId,
+          status: 'active',
+          ip: req.clientIp || '127.0.0.1'
+        });
+      }
+
+      user = await User.findById(user._id).populate('roleRef');
+    }
+
+    const rolePermissions = user.role === 'Admin'
+      ? allPermissions
+      : (user.roleRef?.permissions || []);
+    const userData = getUserResponse(user, rolePermissions);
+
+    res.json({
+      success: true,
+      token: generateToken(user._id, '30d'),
+      user: userData
+    });
+  } catch (error) {
+    console.error('Google Login Error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
