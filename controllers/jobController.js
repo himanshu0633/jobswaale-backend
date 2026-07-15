@@ -303,6 +303,76 @@ exports.getJobById = async (req, res) => {
   }
 };
 
+const calculateMatchScore = (job, seeker) => {
+  let score = 0;
+
+  // 1. Skills Match (Weight: 40 points)
+  if (!job.skills || job.skills.length === 0) {
+    score += 40;
+  } else if (seeker.skills && seeker.skills.length > 0) {
+    const seekerSkillsLower = seeker.skills.map(s => String(s).trim().toLowerCase());
+    let matchedSkills = 0;
+    job.skills.forEach(skill => {
+      if (seekerSkillsLower.includes(String(skill).trim().toLowerCase())) {
+        matchedSkills++;
+      }
+    });
+    score += Math.round((matchedSkills / job.skills.length) * 40);
+  }
+
+  // 2. Experience Match (Weight: 30 points)
+  const normExp = (expStr) => {
+    const str = String(expStr || '').toLowerCase().trim();
+    if (str.includes('fresher')) return 0;
+    if (str.includes('1-2') || str.includes('1-3') || str.includes('1 year') || str.includes('2 years')) return 2;
+    if (str.includes('2-5') || str.includes('3-5') || str.includes('3 years') || str.includes('5 years')) return 4;
+    if (str.includes('5+') || str.includes('5 years') || str.includes('10 years')) return 6;
+    return 2; // default average
+  };
+
+  const jobExp = normExp(job.experience);
+  const seekerExp = normExp(seeker.experience);
+  
+  if (jobExp === seekerExp) {
+    score += 30;
+  } else if (seekerExp >= jobExp) {
+    score += 25; // seeker has more experience than required
+  } else if (Math.abs(seekerExp - jobExp) <= 2) {
+    score += 15; // close enough
+  } else {
+    score += 5;
+  }
+
+  // 3. Location Match (Weight: 20 points)
+  const jobCity = String(job.city || '').trim().toLowerCase();
+  const jobState = String(job.state || '').trim().toLowerCase();
+  const seekerCity = String(seeker.city || '').trim().toLowerCase();
+  const seekerState = String(seeker.state || '').trim().toLowerCase();
+  const preferred = String(seeker.preferredLocation || '').trim().toLowerCase();
+
+  if (jobCity && (jobCity === seekerCity || preferred.includes(jobCity))) {
+    score += 20;
+  } else if (jobState && (jobState === seekerState || preferred.includes(jobState))) {
+    score += 10;
+  } else if (seeker.relocate === 'yes') {
+    score += 15; // relocation allowed
+  } else {
+    score += 5;
+  }
+
+  // 4. Qualification Match (Weight: 10 points)
+  if (!job.qualification) {
+    score += 10;
+  } else if (seeker.qualification && String(seeker.qualification) === String(job.qualification)) {
+    score += 10;
+  } else {
+    score += 5;
+  }
+
+  // Capped between 35 and 100
+  return Math.min(100, Math.max(35, score));
+};
+
 exports.applyJob = async (req, res) => {
   try {
     const { id } = req.params;
@@ -328,10 +398,14 @@ exports.applyJob = async (req, res) => {
       return res.status(400).json({ message: 'You have already applied for this job' });
     }
 
+    // Calculate match score based on skills, location, experience, and qualification
+    const matchScore = calculateMatchScore(job, seeker);
+
     const app = new Application({
       job: job._id,
       candidate: seeker._id,
-      status: 'Applied'
+      status: 'Applied',
+      matchScore
     });
     await app.save();
 

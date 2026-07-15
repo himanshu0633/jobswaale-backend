@@ -98,4 +98,9 @@ const ApplicationSchema = new mongoose.Schema({
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
 });
 
+// Declare database indexes for fast query executions
+ApplicationSchema.index({ job: 1 });
+ApplicationSchema.index({ candidate: 1 });
+ApplicationSchema.index({ status: 1 });
+
 module.exports = mongoose.model('Application', ApplicationSchema);

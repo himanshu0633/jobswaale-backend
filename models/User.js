@@ -122,6 +122,11 @@ const UserSchema = new mongoose.Schema({
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
 });
 
+// Declare database indexes for fast query executions
+UserSchema.index({ role: 1 });
+UserSchema.index({ accountType: 1 });
+UserSchema.index({ isDeleted: 1 });
+
 // Hash password before saving
 UserSchema.pre('save', async function() {
   if (!this.isModified('password')) return;

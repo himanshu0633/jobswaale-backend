@@ -211,6 +211,13 @@ const JobSchema = new mongoose.Schema({
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
 });
 
+// Declare database indexes for fast query executions
+JobSchema.index({ slug: 1 });
+JobSchema.index({ status: 1 });
+JobSchema.index({ jobCategory: 1 });
+JobSchema.index({ jobType: 1 });
+JobSchema.index({ isDeleted: 1 });
+
 const slugify = (text) => {
   return text
     .toString()

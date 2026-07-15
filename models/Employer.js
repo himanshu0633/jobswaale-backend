@@ -169,4 +169,9 @@ const EmployerSchema = new mongoose.Schema({
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
 });
 
+// Declare database indexes for fast query executions
+EmployerSchema.index({ login: 1 });
+EmployerSchema.index({ status: 1 });
+EmployerSchema.index({ isDeleted: 1 });
+
 module.exports = mongoose.model('Employer', EmployerSchema);
