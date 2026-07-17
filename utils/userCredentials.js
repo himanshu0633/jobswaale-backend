@@ -39,6 +39,21 @@ const generatePasswordFromNameAndPhone = (name, phone) => {
   return `${prefix}${digits.slice(start, start + 4)}`;
 };
 
+const normalizeEmail = (email = '') => String(email || '').trim().toLowerCase();
+
+const findDuplicateEmail = async (email, exclude = {}) => {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+
+  const userQuery = {
+    email: normalizedEmail,
+    isDeleted: { $ne: true }
+  };
+  if (exclude.userId) userQuery._id = { $ne: exclude.userId };
+
+  return User.findOne(userQuery).select('_id email accountType role');
+};
+
 const findDuplicateMobile = async (phone, exclude = {}) => {
   const digits = getMobileDigits(phone);
   if (!digits) return null;
@@ -74,8 +89,10 @@ const findDuplicateMobile = async (phone, exclude = {}) => {
 };
 
 module.exports = {
+  normalizeEmail,
   normalizeMobile,
   validateMobileNumber,
   generatePasswordFromNameAndPhone,
+  findDuplicateEmail,
   findDuplicateMobile
 };

@@ -4,10 +4,9 @@ const { protect, authorize, authorizeAdminPortal } = require('../middleware/auth
 const { auditMiddleware } = require('../middleware/audit');
 const { getQualifications, createQualification, updateQualification, deleteQualification } = require('../controllers/qualificationController');
 
-router.use(protect, authorizeAdminPortal);
 router.get('/qualifications', getQualifications);
-router.post('/qualifications', authorize('Admin'), auditMiddleware, createQualification);
-router.put('/qualifications/:uid', authorize('Admin'), auditMiddleware, updateQualification);
-router.delete('/qualifications/:uid', authorize('Admin'), deleteQualification);
+router.post('/qualifications', protect, authorizeAdminPortal, authorize('Admin'), auditMiddleware, createQualification);
+router.put('/qualifications/:uid', protect, authorizeAdminPortal, authorize('Admin'), auditMiddleware, updateQualification);
+router.delete('/qualifications/:uid', protect, authorizeAdminPortal, authorize('Admin'), deleteQualification);
 
 module.exports = router;

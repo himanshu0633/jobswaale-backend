@@ -12,6 +12,7 @@ const IndustryType = require('../models/IndustryType');
 const PlanMapping = require('../models/PlanMapping');
 const Feature = require('../models/Feature');
 const Employer = require('../models/Employer');
+const { findDuplicateMobile, validateMobileNumber } = require('../utils/userCredentials');
 
 const GOOGLE_PROFILE_DUMMY_VALUES = {
   phone: 'Not Specified',
@@ -76,23 +77,29 @@ const ensureJobseekerExists = async (userId) => {
   if (!seeker) {
     const user = await User.findById(userId);
     
-    seeker = await Jobseeker.create({
-      userId: userId,
-      login: userId,
-      name: user ? `${user.firstName} ${user.lastName}`.trim() : 'Anonymous',
-      phone: user?.phone || '',
-      gender: '',
-      city: '',
-      state: '',
-      country: '',
-      district: '',
-      address: '',
-      pinCode: '',
-      qualification: null,
-      currentPlan: user?.selectedPlan || null,
-      experience: user?.workStatus || '',
-      status: 'active'
-    });
+    seeker = await Jobseeker.findOneAndUpdate(
+      { userId },
+      {
+        $setOnInsert: {
+          userId,
+          login: userId,
+          name: user ? `${user.firstName} ${user.lastName}`.trim() : 'Anonymous',
+          phone: user?.phone || '',
+          gender: '',
+          city: '',
+          state: '',
+          country: '',
+          district: '',
+          address: '',
+          pinCode: '',
+          qualification: null,
+          currentPlan: user?.selectedPlan || null,
+          experience: user?.workStatus || '',
+          status: 'active'
+        }
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
   }
   return seeker;
 };
@@ -384,8 +391,18 @@ exports.updateJobseekerProfile = async (req, res) => {
 
     // Assign fields
     if (phone !== undefined) {
-      seeker.phone = phone;
-      await User.findByIdAndUpdate(userId, { phone });
+      const normalizedPhone = String(phone || '').trim() ? validateMobileNumber(phone) : '';
+      if (normalizedPhone) {
+        const phoneExists = await findDuplicateMobile(normalizedPhone, {
+          userId,
+          jobseekerId: seeker._id
+        });
+        if (phoneExists) {
+          return res.status(400).json({ message: 'Mobile number already exists' });
+        }
+      }
+      seeker.phone = normalizedPhone;
+      await User.findByIdAndUpdate(userId, { phone: normalizedPhone });
     }
     if (gender !== undefined) seeker.gender = gender;
     if (dob !== undefined) seeker.dob = dob;

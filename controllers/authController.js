@@ -9,6 +9,12 @@ const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
 const { isSuperAdminAccount } = require('../middleware/auth');
 const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
+const {
+  findDuplicateEmail,
+  findDuplicateMobile,
+  normalizeEmail,
+  validateMobileNumber
+} = require('../utils/userCredentials');
 
 // Helper to generate JWT token
 const generateToken = (id, expiresIn = '30d') => {
@@ -136,9 +142,19 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: 'Please provide complete company details' });
     }
 
-    const userExists = await User.findOne({ email });
+    const normalizedEmail = normalizeEmail(email);
+    const userExists = await findDuplicateEmail(normalizedEmail);
     if (userExists) {
       return res.status(400).json({ message: 'User already exists with this email' });
+    }
+
+    let normalizedPhone = String(phone || '').trim();
+    if (normalizedPhone) {
+      normalizedPhone = validateMobileNumber(normalizedPhone);
+      const phoneExists = await findDuplicateMobile(normalizedPhone);
+      if (phoneExists) {
+        return res.status(400).json({ message: 'Mobile number already exists' });
+      }
     }
 
     const nameParts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
@@ -151,7 +167,7 @@ exports.register = async (req, res) => {
     const user = await User.create({
       firstName,
       lastName,
-      phone: String(phone || '').trim(),
+      phone: normalizedPhone,
       workStatus: role === 'Jobseeker' ? String(workStatus || '').trim() : '',
       selectedPlan: selectedPlanId,
       updatesConsent: updatesConsent !== false,
@@ -159,7 +175,7 @@ exports.register = async (req, res) => {
       designation: role === 'Employer' ? String(designation || '').trim() : '',
       companyType: role === 'Employer' ? String(companyType || '').trim() : '',
       companySize: role === 'Employer' ? String(companySize || '').trim() : '',
-      email,
+      email: normalizedEmail,
       password,
       role,
       accountType: role === 'Employer' ? 'employer' : 'jobseeker',
@@ -172,7 +188,7 @@ exports.register = async (req, res) => {
         login: user._id,
         companyName: String(companyName || '').trim(),
         contactPerson: String(fullName || '').trim(),
-        phone: String(phone || '').trim(),
+        phone: normalizedPhone,
         companySize: String(companySize || '').trim(),
         currentPlan: selectedPlanId,
         status: 'active',
@@ -186,8 +202,8 @@ exports.register = async (req, res) => {
       title: `New ${role} Registration`,
       rows: [
         { label: 'Name', value: String(fullName || '').trim() || '-' },
-        { label: 'Email', value: email },
-        { label: 'Phone', value: String(phone || '').trim() || '-' },
+        { label: 'Email', value: normalizedEmail },
+        { label: 'Phone', value: normalizedPhone || '-' },
         ...(role === 'Employer' ? [
           { label: 'Company', value: String(companyName || '').trim() || '-' },
           { label: 'Designation', value: String(designation || '').trim() || '-' },
@@ -220,6 +236,13 @@ exports.register = async (req, res) => {
     });
   } catch (error) {
     console.error('Register Error:', error);
+    if (error?.code === 11000) {
+      const duplicateField = Object.keys(error.keyPattern || error.keyValue || {})[0];
+      const message = duplicateField === 'phone'
+        ? 'Mobile number already exists'
+        : 'User already exists with this email';
+      return res.status(400).json({ message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };

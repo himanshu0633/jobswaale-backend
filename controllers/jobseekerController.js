@@ -1,7 +1,12 @@
 const Jobseeker = require('../models/Jobseeker');
 const User = require('../models/User');
 const Application = require('../models/Application');
-const { validateMobileNumber, findDuplicateMobile } = require('../utils/userCredentials');
+const {
+  findDuplicateEmail,
+  findDuplicateMobile,
+  normalizeEmail,
+  validateMobileNumber
+} = require('../utils/userCredentials');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
 
@@ -202,7 +207,8 @@ exports.createJobseeker = async (req, res) => {
       return res.status(400).json({ message: 'email, password, name, phone, gender, qualification, and experience are required' });
     }
 
-    const userExists = await User.findOne({ email });
+    const normalizedEmail = normalizeEmail(email);
+    const userExists = await findDuplicateEmail(normalizedEmail);
     if (userExists) {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
@@ -215,7 +221,7 @@ exports.createJobseeker = async (req, res) => {
 
     // Create user credentials
     const user = await User.create({
-      email,
+      email: normalizedEmail,
       phone: normalizedPhone,
       password,
       role: 'Jobseeker',
@@ -257,7 +263,7 @@ exports.createJobseeker = async (req, res) => {
       title: 'New Jobseeker Registration',
       rows: [
         { label: 'Name', value: name },
-        { label: 'Email', value: email },
+        { label: 'Email', value: normalizedEmail },
         { label: 'Phone', value: normalizedPhone },
         { label: 'Experience', value: experience },
         { label: 'Status', value: jobseeker.status }
@@ -265,6 +271,13 @@ exports.createJobseeker = async (req, res) => {
     });
     res.status(201).json(jobseeker);
   } catch (error) {
+    if (error?.code === 11000) {
+      const duplicateField = Object.keys(error.keyPattern || error.keyValue || {})[0];
+      const message = duplicateField === 'phone'
+        ? 'Mobile number already exists'
+        : 'User with this email already exists';
+      return res.status(400).json({ message });
+    }
     res.status(400).json({ message: error.message });
   }
 };
@@ -352,6 +365,13 @@ exports.updateJobseeker = async (req, res) => {
 
     res.json(updated);
   } catch (error) {
+    if (error?.code === 11000) {
+      const duplicateField = Object.keys(error.keyPattern || error.keyValue || {})[0];
+      const message = duplicateField === 'phone'
+        ? 'Mobile number already exists'
+        : 'User with this email already exists';
+      return res.status(400).json({ message });
+    }
     res.status(400).json({ message: error.message });
   }
 };
