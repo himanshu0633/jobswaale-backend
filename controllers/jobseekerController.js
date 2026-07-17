@@ -1,5 +1,6 @@
 const Jobseeker = require('../models/Jobseeker');
 const User = require('../models/User');
+const Application = require('../models/Application');
 const { validateMobileNumber, findDuplicateMobile } = require('../utils/userCredentials');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
@@ -67,6 +68,104 @@ exports.getJobseekers = async (req, res) => {
       });
 
     res.json([...list, ...pendingProfiles]);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getJobseekerApplicationHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    let jobseeker = await Jobseeker.findById(id)
+      .populate('userId', 'email phone firstName lastName')
+      .lean();
+
+    if (!jobseeker) {
+      jobseeker = await Jobseeker.findOne({ userId: id })
+        .populate('userId', 'email phone firstName lastName')
+        .lean();
+    }
+
+    if (!jobseeker) {
+      const user = await User.findOne({
+        _id: id,
+        isDeleted: { $ne: true },
+        $or: [{ role: 'Jobseeker' }, { accountType: 'jobseeker' }]
+      }).select('_id firstName lastName email phone').lean();
+
+      if (!user) {
+        return res.status(404).json({ message: 'Jobseeker profile not found' });
+      }
+
+      return res.json({
+        jobseeker: {
+          id: user._id,
+          name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Jobseeker',
+          email: user.email || '',
+          phone: user.phone || ''
+        },
+        stats: {
+          total: 0,
+          applied: 0,
+          shortlisted: 0,
+          interview: 0,
+          offered: 0,
+          rejected: 0
+        },
+        history: []
+      });
+    }
+
+    const applications = await Application.find({ candidate: jobseeker._id })
+      .populate({
+        path: 'job',
+        select: 'jobTitle companyName status jobExpiry city state login',
+        populate: { path: 'login', select: 'email firstName lastName companyName' }
+      })
+      .sort({ appliedDate: -1, createDate: -1 })
+      .lean();
+
+    const history = applications.map((application) => {
+      const job = application.job;
+      const appliedDate = application.appliedDate || application.createDate;
+      return {
+        id: application._id,
+        applicationId: application._id,
+        jobId: job?._id || null,
+        jobTitle: job?.jobTitle || 'Deleted job',
+        employerName: job?.companyName || job?.login?.companyName || [job?.login?.firstName, job?.login?.lastName].filter(Boolean).join(' ') || 'Employer',
+        employerEmail: job?.login?.email || '',
+        jobLocation: [job?.city, job?.state].filter(Boolean).join(', '),
+        jobStatus: job?.status || '',
+        jobExpiry: job?.jobExpiry || null,
+        applicationStatus: application.status || 'Applied',
+        matchScore: application.matchScore || 0,
+        appliedDate,
+        appliedDisplayDate: appliedDate ? new Date(appliedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—',
+        shortlistedDate: application.shortlistedDate || null,
+        interviewDetails: application.interviewDetails || null,
+        selectionDetails: application.selectionDetails || null
+      };
+    });
+
+    res.json({
+      jobseeker: {
+        id: jobseeker._id,
+        name: jobseeker.name,
+        email: jobseeker.userId?.email || '',
+        phone: jobseeker.phone || jobseeker.userId?.phone || ''
+      },
+      stats: {
+        total: history.length,
+        applied: history.filter(item => item.applicationStatus === 'Applied').length,
+        shortlisted: history.filter(item => item.applicationStatus === 'Shortlisted').length,
+        interview: history.filter(item => item.applicationStatus === 'Interview').length,
+        offered: history.filter(item => item.applicationStatus === 'Offered').length,
+        rejected: history.filter(item => item.applicationStatus === 'Rejected').length
+      },
+      history
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

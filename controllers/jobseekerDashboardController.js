@@ -39,6 +39,37 @@ const clearGoogleDummyProfileValues = (seeker) => {
   return seeker;
 };
 
+const getJobseekerProfileCompletion = (seeker = {}) => {
+  const requiredFields = [
+    { key: 'name', label: 'Full name' },
+    { key: 'phone', label: 'Phone number' },
+    { key: 'gender', label: 'Gender' },
+    { key: 'qualification', label: 'Qualification' },
+    { key: 'designation', label: 'Current role' },
+    { key: 'experience', label: 'Experience' },
+    { key: 'country', label: 'Country' },
+    { key: 'state', label: 'State' },
+    { key: 'city', label: 'City' }
+  ];
+
+  const missingFields = requiredFields
+    .filter(({ key }) => {
+      const value = seeker[key];
+      if (Array.isArray(value)) return value.length === 0;
+      if (value && typeof value === 'object') return !value._id && !value.id && !value.name;
+      return !String(value || '').trim();
+    })
+    .map(({ label }) => label);
+  const completedFields = requiredFields.length - missingFields.length;
+  const profileCompletionScore = Math.round((completedFields / requiredFields.length) * 100);
+
+  return {
+    profileIncomplete: missingFields.length > 0,
+    profileCompletionScore,
+    profileMissingFields: missingFields
+  };
+};
+
 // Helper to ensure a Jobseeker document exists for a user
 const ensureJobseekerExists = async (userId) => {
   let seeker = await Jobseeker.findOne({ userId });
@@ -294,7 +325,12 @@ exports.getJobseekerProfile = async (req, res) => {
       .populate('currentPlan', 'planName cost planValidity planType category')
       .lean();
 
-    res.json(clearGoogleDummyProfileValues(populatedSeeker));
+    const cleanedProfile = clearGoogleDummyProfileValues(populatedSeeker);
+
+    res.json({
+      ...cleanedProfile,
+      ...getJobseekerProfileCompletion(cleanedProfile)
+    });
   } catch (error) {
     console.error('Get Jobseeker Profile Error:', error);
     res.status(500).json({ message: 'Server error loading profile details' });
@@ -398,7 +434,13 @@ exports.updateJobseekerProfile = async (req, res) => {
       .populate('currentPlan', 'planName cost planValidity planType category')
       .lean();
 
-    res.json({ message: 'Profile updated successfully', seeker: populated });
+    res.json({
+      message: 'Profile updated successfully',
+      seeker: {
+        ...populated,
+        ...getJobseekerProfileCompletion(populated)
+      }
+    });
   } catch (error) {
     console.error('Update Jobseeker Profile Error:', error);
     res.status(500).json({ message: 'Server error updating profile details' });

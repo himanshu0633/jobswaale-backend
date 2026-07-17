@@ -4,6 +4,7 @@ const { protect, authorizeAdminPortal } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
 const {
   getJobseekers,
+  getJobseekerApplicationHistory,
   createJobseeker,
   updateJobseeker,
   deleteJobseeker,
@@ -13,6 +14,7 @@ const {
 router.use(protect, authorizeAdminPortal);
 
 router.get('/', getJobseekers);
+router.get('/:id/applications', getJobseekerApplicationHistory);
 router.post('/', auditMiddleware, createJobseeker);
 router.put('/:id', auditMiddleware, updateJobseeker);
 router.delete('/:id', deleteJobseeker);

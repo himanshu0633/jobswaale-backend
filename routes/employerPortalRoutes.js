@@ -1,16 +1,26 @@
 const express = require('express');
 const router = express.Router();
 const { protect, authorizeEmployerPortal } = require('../middleware/auth');
+const { uploadMessageAttachment } = require('../middleware/messageUpload');
+const { createImageUpload } = require('../middleware/imageUpload');
+const {
+  listEmployerMessages,
+  getEmployerUnreadCount,
+  getEmployerMessageThread,
+  sendEmployerMessage
+} = require('../controllers/messageController');
 const {
   createEmployerJob,
   deleteEmployerJob,
   duplicateEmployerJob,
   getEmployerDashboard,
   getEmployerProfile,
+  uploadEmployerLogo,
   updateEmployerProfile,
   getEmployerSubscription,
   selectEmployerPlan,
   getEmployerApplications,
+  getEmployerApplicantHistory,
   getEmployerApplicationDetails,
   getEmployerCandidateProfile,
   getEmployerCandidates,
@@ -39,11 +49,17 @@ router.use(protect, authorizeEmployerPortal);
 
 router.get('/dashboard', getEmployerDashboard);
 router.get('/profile', getEmployerProfile);
+router.post('/profile/logo', createImageUpload('employer-logos')('logo'), uploadEmployerLogo);
 router.put('/profile', updateEmployerProfile);
 router.get('/subscription-details', getEmployerSubscription);
 router.post('/subscription/select-plan', selectEmployerPlan);
 router.get('/applications', getEmployerApplications);
+router.get('/applicant-history', getEmployerApplicantHistory);
 router.get('/applications/:id', getEmployerApplicationDetails);
+router.get('/messages', listEmployerMessages);
+router.get('/messages/unread', getEmployerUnreadCount);
+router.get('/messages/:applicationId', getEmployerMessageThread);
+router.post('/messages/:applicationId', uploadMessageAttachment, sendEmployerMessage);
 router.get('/candidateProfile/:id', getEmployerCandidateProfile);
 router.get('/candidates', getEmployerCandidates);
 router.get('/interviews', getEmployerInterviews);

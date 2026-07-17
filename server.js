@@ -2,8 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const http = require('http');
 const connectDB = require('./config/db');
 const { maintenanceGuard } = require('./middleware/systemSettings');
+const { initSocket } = require('./realtime/socket');
 
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '.env') });
@@ -12,9 +14,10 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 connectDB();
 
 const app = express();
+const server = http.createServer(app);
 
 // Middleware
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     // Allow any origin dynamically
     callback(null, true);
@@ -22,8 +25,33 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
-}));
+};
+
+app.use(cors(corsOptions));
+initSocket(server, corsOptions);
 app.use(express.json({ limit: '10mb' }));
+app.get('/uploads/messages/:filename', async (req, res, next) => {
+  try {
+    const Attachment = require('./models/Attachment');
+    const file = await Attachment.findOne({ filename: req.params.filename });
+    if (!file) {
+      return next();
+    }
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Length', file.size);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.send(file.data);
+  } catch (err) {
+    console.error('Fetch attachment error:', err);
+    next(err);
+  }
+});
+
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
+if (isVercel) {
+  app.use('/uploads', express.static(path.join('/tmp', 'uploads')));
+}
 app.use(maintenanceGuard);
 
 // Routes
@@ -68,8 +96,10 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+  });
+}
 
 module.exports = app;

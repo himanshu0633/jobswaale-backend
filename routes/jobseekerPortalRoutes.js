@@ -1,6 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
+const { uploadMessageAttachment } = require('../middleware/messageUpload');
+const {
+  listJobseekerMessages,
+  getJobseekerUnreadCount,
+  getJobseekerMessageThread,
+  sendJobseekerMessage
+} = require('../controllers/messageController');
 const {
   getJobseekerDashboard,
   getJobseekerProfile,
@@ -33,6 +40,10 @@ router.put('/profile', updateJobseekerProfile);
 router.get('/subscription', getJobseekerSubscription);
 router.post('/subscription/select-plan', selectJobseekerPlan);
 router.get('/applications', getJobseekerApplications);
+router.get('/messages', listJobseekerMessages);
+router.get('/messages/unread', getJobseekerUnreadCount);
+router.get('/messages/:applicationId', getJobseekerMessageThread);
+router.post('/messages/:applicationId', uploadMessageAttachment, sendJobseekerMessage);
 router.get('/saved-jobs', getJobseekerSavedJobs);
 router.post('/saved-jobs/:jobId/toggle', toggleSaveJob);
 router.get('/saved-employers', getJobseekerSavedEmployers);

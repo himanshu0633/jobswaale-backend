@@ -85,6 +85,100 @@ const getInitials = (name = '') => {
   return (parts[0]?.[0] || 'C') + (parts[1]?.[0] || parts[0]?.[1] || '');
 };
 
+const getEmployerProfileCompletion = (employer = {}, user = {}) => {
+  const profile = {
+    companyName: employer?.companyName || user?.companyName || '',
+    contactPerson: employer?.contactPerson || `${user?.firstName || ''} ${user?.lastName || ''}`.trim(),
+    email: user?.email || '',
+    phone: employer?.phone || user?.phone || '',
+    industryType: employer?.industryType || null,
+    website: employer?.website || '',
+    description: employer?.description || '',
+    country: employer?.country || '',
+    state: employer?.state || '',
+    district: employer?.district || '',
+    city: employer?.city || '',
+    address: employer?.address || '',
+    pinCode: employer?.pinCode || '',
+    tagline: employer?.tagline || '',
+    foundedYear: employer?.foundedYear || '',
+    companySize: employer?.companySize || user?.companySize || '',
+    gstNumber: employer?.gstNumber || '',
+    logo: employer?.logo || '',
+    socialLinks: employer?.socialLinks || {}
+  };
+
+  const profileFields = [
+    { key: 'companyName', label: 'Company name' },
+    { key: 'contactPerson', label: 'Contact person' },
+    { key: 'industryType', label: 'Industry type' },
+    { key: 'companySize', label: 'Company size' },
+    { key: 'tagline', label: 'Company tagline' },
+    { key: 'foundedYear', label: 'Founded year' },
+    { key: 'website', label: 'Website URL' },
+    { key: 'email', label: 'Contact email' },
+    { key: 'phone', label: 'Phone number' },
+    { key: 'gstNumber', label: 'GST / VAT number' },
+    { key: 'logo', label: 'Company logo' },
+    { key: 'description', label: 'About company' },
+    { key: 'country', label: 'Country' },
+    { key: 'state', label: 'State' },
+    { key: 'district', label: 'District' },
+    { key: 'city', label: 'City' },
+    { key: 'address', label: 'Full address' },
+    { key: 'pinCode', label: 'Pincode' }
+  ];
+  const socialFields = [
+    { key: 'linkedin', label: 'LinkedIn' },
+    { key: 'twitter', label: 'Twitter' },
+    { key: 'youtube', label: 'YouTube' },
+    { key: 'facebook', label: 'Facebook' },
+    { key: 'instagram', label: 'Instagram' }
+  ];
+
+  const hasValue = (value) => {
+    if (value && typeof value === 'object') return Boolean(value._id || value.id);
+    return Boolean(String(value || '').trim());
+  };
+
+  const profileResults = profileFields.map(field => ({
+    ...field,
+    completed: hasValue(profile[field.key])
+  }));
+  const socialResults = socialFields.map(field => ({
+    ...field,
+    completed: hasValue(profile.socialLinks?.[field.key])
+  }));
+  const completedProfileFields = profileResults.filter(field => field.completed).length;
+  const completedSocialFields = socialResults.filter(field => field.completed).length;
+  const profileScore = (completedProfileFields / profileFields.length) * 95;
+  const socialScore = (completedSocialFields / socialFields.length) * 5;
+  const profileCompletionScore = Math.round(profileScore + socialScore);
+  const missingFields = [...profileResults, ...socialResults]
+    .filter(field => !field.completed)
+    .map(field => field.label);
+
+  return {
+    profileIncomplete: missingFields.length > 0,
+    profileCompletionScore,
+    profileMissingFields: missingFields,
+    profileCompletionBreakdown: {
+      profileFields: {
+        completed: completedProfileFields,
+        total: profileFields.length,
+        maxScore: 95,
+        perFieldScore: Number((95 / profileFields.length).toFixed(2))
+      },
+      socialLinks: {
+        completed: completedSocialFields,
+        total: socialFields.length,
+        maxScore: 5,
+        perFieldScore: 1
+      }
+    }
+  };
+};
+
 const getExperienceValue = (value = '') => {
   const text = String(value).toLowerCase();
   if (text.includes('fresher')) return 0;
@@ -667,6 +761,98 @@ exports.getEmployerApplications = async (req, res) => {
       },
       applications: items,
       pagination
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getEmployerApplicantHistory = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const query = req.query || {};
+
+    const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
+      .select('_id jobTitle companyName status jobExpiry city state')
+      .lean();
+    const jobIds = jobs.map(job => job._id);
+
+    const dbApps = await Application.find({ job: { $in: jobIds } })
+      .populate({
+        path: 'job',
+        select: 'jobTitle companyName status jobExpiry city state'
+      })
+      .populate({
+        path: 'candidate',
+        populate: [
+          { path: 'userId', select: 'email phone firstName lastName' },
+          { path: 'qualification', select: 'name' }
+        ]
+      })
+      .sort({ appliedDate: -1, createDate: -1 })
+      .lean();
+
+    let applicants = dbApps.map((app) => {
+      const candidate = app.candidate;
+      const job = app.job;
+      if (!candidate || !job) return null;
+      const appliedDate = app.appliedDate || app.createDate;
+
+      return {
+        id: app._id,
+        applicationId: app._id,
+        candidateId: candidate._id,
+        name: candidate.name || [candidate.userId?.firstName, candidate.userId?.lastName].filter(Boolean).join(' ') || 'Jobseeker',
+        email: candidate.userId?.email || '',
+        phone: candidate.phone || candidate.userId?.phone || '',
+        qualification: candidate.qualification?.name || '',
+        experience: candidate.experience || '',
+        location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || '',
+        jobId: job._id,
+        jobTitle: job.jobTitle || 'Job',
+        jobStatus: job.status || '',
+        jobExpiry: job.jobExpiry || null,
+        status: app.status || 'Applied',
+        matchScore: app.matchScore || 0,
+        appliedDate,
+        appliedDisplayDate: appliedDate ? new Date(appliedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+      };
+    }).filter(Boolean);
+
+    const rawSearch = String(query.search || '').trim().toLowerCase();
+    applicants = applicants.filter((item) => {
+      const matchesSearch = !rawSearch || [
+        item.name,
+        item.email,
+        item.phone,
+        item.jobTitle,
+        item.status,
+        item.location,
+        item.experience
+      ].join(' ').toLowerCase().includes(rawSearch);
+      const matchesJob = !query.jobId || String(item.jobId) === String(query.jobId);
+      const matchesStatus = !query.status || item.status === query.status;
+      return matchesSearch && matchesJob && matchesStatus;
+    });
+
+    const statusCounts = applicants.reduce((acc, item) => {
+      acc[item.status] = (acc[item.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    res.json({
+      stats: {
+        total: applicants.length,
+        applied: statusCounts.Applied || 0,
+        shortlisted: statusCounts.Shortlisted || 0,
+        interview: statusCounts.Interview || 0,
+        offered: statusCounts.Offered || 0,
+        rejected: statusCounts.Rejected || 0
+      },
+      filters: {
+        jobs: jobs.map(job => ({ id: job._id, title: job.jobTitle }))
+      },
+      applicants
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -1498,10 +1684,13 @@ exports.getEmployerProfile = async (req, res) => {
       Country.find({ isDeleted: { $ne: true }, status: 'active' }).lean()
     ]);
 
+    const profileCompletion = getEmployerProfileCompletion(employer, req.user);
+
     res.json({
       name: employer?.companyName || req.user.companyName || req.user.firstName || 'Employer',
       status: employer?.status || req.user.status || 'active',
       isVerified: employer?.isVerified === true,
+      ...profileCompletion,
       planName: plan?.planName || 'No Plan',
       planBadge: plan?.badge || plan?.planName || 'No Plan',
       planValidity: employer?.planValidity || null,
@@ -1654,6 +1843,41 @@ exports.updateEmployerProfile = async (req, res) => {
     res.json({ message: 'Profile updated successfully', employer });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.uploadEmployerLogo = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Logo image is required.' });
+    }
+
+    const userId = req.user._id;
+    const logoUrl = `${req.protocol}://${req.get('host')}/uploads/employer-logos/${req.file.filename}`;
+
+    const user = await User.findById(userId);
+    let employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    });
+
+    if (!employer) {
+      employer = new Employer({
+        userId,
+        login: userId,
+        companyName: user?.companyName || 'My Company',
+        phone: user?.phone || '0000000000',
+        status: 'active'
+      });
+    }
+
+    employer.logo = logoUrl;
+    await employer.save();
+
+    res.json({ message: 'Logo uploaded successfully', logo: logoUrl });
+  } catch (error) {
+    console.error('Upload Employer Logo Error:', error);
+    res.status(500).json({ message: 'Server error uploading logo' });
   }
 };
 
