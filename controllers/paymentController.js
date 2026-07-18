@@ -5,6 +5,7 @@ const Plan = require('../models/Plan');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
+const { ensureEmployerAutoMailSetting } = require('../utils/employerAutoMail');
 
 const getNextPaymentId = async () => {
   const lastPayment = await Payment.findOne({ paymentId: /^PAY-\d+$/ })
@@ -33,6 +34,7 @@ const getCustomerDetails = async (userType, customerId) => {
 
   return {
     id: record._id,
+    userId: record.userId?._id || record.userId,
     name: userType === 'Employer' ? record.companyName : record.name,
     email: record.userId?.email || '',
     phone: record.phone || ''
@@ -231,6 +233,17 @@ exports.createPayment = async (req, res) => {
     }));
 
     await newPayment.save();
+    if (newPayment.userType === 'Employer' && newPayment.paymentStatus === 'Success' && customerDetails?.id && planDoc?._id) {
+      await Employer.findByIdAndUpdate(customerDetails.id, addAuditOnUpdate(req, {
+        currentPlan: planDoc._id,
+        planValidity: validTill
+      }));
+      await ensureEmployerAutoMailSetting({
+        employer: { _id: customerDetails.id, userId: customerDetails.userId, login: customerDetails.userId, currentPlan: planDoc._id },
+        plan: planDoc,
+        resetUsage: true
+      });
+    }
     const settings = await getSettings();
     await sendAdminNotification({
       enabled: settings.notifPayment,

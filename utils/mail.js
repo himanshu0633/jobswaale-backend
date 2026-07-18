@@ -135,9 +135,47 @@ const sendAdminNotification = async ({ enabled, subject, title, rows = [] }) => 
   }
 };
 
+const buildJobAlertEmail = ({ seekerName, job, employer, categoryName }) => {
+  const frontUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const jobUrl = `${frontUrl}/jobs/${job.slug || job._id}`;
+  return `
+    <div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.55;">
+      <h2 style="margin:0 0 12px;">New ${escapeHtml(categoryName || 'job')} opening</h2>
+      <p>Hi ${escapeHtml(seekerName || 'Candidate')},</p>
+      <p>${escapeHtml(employer?.companyName || job.companyName || 'An employer')} has posted a new job that matches your profile category.</p>
+      <table cellspacing="0" cellpadding="0" style="border:1px solid #e5e7eb;border-radius:8px;border-collapse:collapse;min-width:320px;margin:16px 0;">
+        <tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;"><strong>Job</strong></td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${escapeHtml(job.jobTitle)}</td></tr>
+        <tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;"><strong>Company</strong></td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${escapeHtml(job.companyName)}</td></tr>
+        <tr><td style="padding:8px 12px;"><strong>Location</strong></td><td style="padding:8px 12px;">${escapeHtml([job.city, job.state].filter(Boolean).join(', ') || 'Not specified')}</td></tr>
+      </table>
+      <p><a href="${escapeHtml(jobUrl)}" style="display:inline-block;background:#6658dd;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;font-weight:700;">View and apply</a></p>
+    </div>
+  `;
+};
+
+const sendJobAlertEmail = async ({ to, seekerName, job, employer, categoryName }) => {
+  try {
+    const settings = await getSettings();
+    const transporter = createTransportFromSettings(settings);
+
+    await transporter.sendMail({
+      from: getMailFrom(settings),
+      to,
+      subject: `${job.companyName || 'Employer'} posted: ${job.jobTitle}`,
+      html: buildJobAlertEmail({ seekerName, job, employer, categoryName })
+    });
+
+    return { sent: true };
+  } catch (error) {
+    console.log(`Job alert mail skipped. ${error.message}. Recipient: ${to}`);
+    return { sent: false, reason: error.message };
+  }
+};
+
 module.exports = {
   buildUserWelcomeEmail,
   createTransportFromSettings,
   sendUserWelcomeEmail,
-  sendAdminNotification
+  sendAdminNotification,
+  sendJobAlertEmail
 };

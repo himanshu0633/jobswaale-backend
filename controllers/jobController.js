@@ -324,9 +324,8 @@ const calculateMatchScore = (job, seeker) => {
   const normExp = (expStr) => {
     const str = String(expStr || '').toLowerCase().trim();
     if (str.includes('fresher')) return 0;
-    if (str.includes('1-2') || str.includes('1-3') || str.includes('1 year') || str.includes('2 years')) return 2;
-    if (str.includes('2-5') || str.includes('3-5') || str.includes('3 years') || str.includes('5 years')) return 4;
-    if (str.includes('5+') || str.includes('5 years') || str.includes('10 years')) return 6;
+    const numbers = str.match(/\d+/g);
+    if (numbers?.length) return Math.max(...numbers.map(Number));
     return 2; // default average
   };
 

@@ -27,6 +27,7 @@ const {
   getEmployerInterviews,
   getEmployerReports,
   getEmployerSelected,
+  getEmployerAutoMailSettings,
   getEmployerJobForm,
   getEmployerJobDetails,
   getEmployerJobs,
@@ -42,6 +43,7 @@ const {
   searchEmployerTalentPoolCandidates,
   getEmployerSettings,
   updateEmployerSettings,
+  updateEmployerAutoMailSettings,
   submitSupportTicket
 } = require('../controllers/employerDashboardController');
 
@@ -53,6 +55,8 @@ router.post('/profile/logo', createImageUpload('employer-logos')('logo'), upload
 router.put('/profile', updateEmployerProfile);
 router.get('/subscription-details', getEmployerSubscription);
 router.post('/subscription/select-plan', selectEmployerPlan);
+router.get('/auto-mail-settings', getEmployerAutoMailSettings);
+router.put('/auto-mail-settings', updateEmployerAutoMailSettings);
 router.get('/applications', getEmployerApplications);
 router.get('/applicant-history', getEmployerApplicantHistory);
 router.get('/applications/:id', getEmployerApplicationDetails);

@@ -17,6 +17,12 @@ const User = require('../models/User');
 const SupportTicket = require('../models/SupportTicket');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
 const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
+const {
+  ensureEmployerAutoMailSetting,
+  getEmployerAutoMailSummary,
+  updateEmployerAutoMailSetting,
+  sendEmployerJobAutoMails
+} = require('../utils/employerAutoMail');
 
 const formatDate = (value) => {
   if (!value) return null;
@@ -285,7 +291,7 @@ const ensureApplicationsExist = async (userId) => {
         jobType: jobType._id,
         vacancies: 3,
         description: 'We are looking for a MERN Stack Developer with experience in React, Node, Express, and MongoDB.',
-        experience: '2 - 5 Years',
+        experience: '2+ Years',
         country: 'India',
         state: 'Karnataka',
         district: 'Bangalore',
@@ -308,11 +314,11 @@ const ensureApplicationsExist = async (userId) => {
     if (existingAppsCount < 3) {
       const mockCandidates = [
         { name: 'Rohan Malhotra', email: 'rohan@gmail.com', city: 'Delhi', state: 'Delhi', experience: 'Fresher', matchScore: 78, skills: ['JS', 'React', 'CSS'], phone: '9123456780', gender: 'Male' },
-        { name: 'Kirti Sen', email: 'kirti@gmail.com', city: 'Indore', state: 'Madhya Pradesh', experience: '1 - 2 Years', matchScore: 82, skills: ['HTML', 'CSS', 'Figma'], phone: '9123456781', gender: 'Female' },
-        { name: 'Aditya Roy', email: 'aditya@gmail.com', city: 'Bangalore', state: 'Karnataka', experience: '2 - 5 Years', matchScore: 91, skills: ['Node', 'Express', 'MongoDB'], phone: '9123456782', gender: 'Male' },
+        { name: 'Kirti Sen', email: 'kirti@gmail.com', city: 'Indore', state: 'Madhya Pradesh', experience: '1+ Years', matchScore: 82, skills: ['HTML', 'CSS', 'Figma'], phone: '9123456781', gender: 'Female' },
+        { name: 'Aditya Roy', email: 'aditya@gmail.com', city: 'Bangalore', state: 'Karnataka', experience: '2+ Years', matchScore: 91, skills: ['Node', 'Express', 'MongoDB'], phone: '9123456782', gender: 'Male' },
         { name: 'Shweta Tiwari', email: 'shweta@gmail.com', city: 'Pune', state: 'Maharashtra', experience: '5+ Years', matchScore: 88, skills: ['React', 'Angular', 'Vue'], phone: '9123456783', gender: 'Female' },
-        { name: 'Gaurav Das', email: 'gaurav@gmail.com', city: 'Kolkata', state: 'West Bengal', experience: '2 - 5 Years', matchScore: 74, skills: ['Python', 'Flask', 'MySQL'], phone: '9123456784', gender: 'Male' },
-        { name: 'Ritu Phogat', email: 'ritu@gmail.com', city: 'Gurugram', state: 'Haryana', experience: '1 - 2 Years', matchScore: 85, skills: ['JS', 'React', 'Node'], phone: '9123456785', gender: 'Female' }
+        { name: 'Gaurav Das', email: 'gaurav@gmail.com', city: 'Kolkata', state: 'West Bengal', experience: '2+ Years', matchScore: 74, skills: ['Python', 'Flask', 'MySQL'], phone: '9123456784', gender: 'Male' },
+        { name: 'Ritu Phogat', email: 'ritu@gmail.com', city: 'Gurugram', state: 'Haryana', experience: '1+ Years', matchScore: 85, skills: ['JS', 'React', 'Node'], phone: '9123456785', gender: 'Female' }
       ];
 
       let qualGrad = await Qualification.findOne();
@@ -472,7 +478,7 @@ const buildJobPreview = async (req, employer, payload) => {
     location: locations.length ? locations.join(', ') : [employer?.city, employer?.state].filter(Boolean).join(', ') || 'Bangalore, Karnataka',
     employmentType: jobType?.jobType || payload.employmentType || payload.jobTypeName || 'Full Time',
     category: category?.categoryName || '',
-    experience: payload.requiredExperience || payload.experience || '2 - 5 Years',
+    experience: payload.requiredExperience || payload.experience || '2+ Years',
     salary,
     workMode: payload.workMode || 'Office',
     openings: Number(payload.vacancies || payload.openings || 2),
@@ -2005,6 +2011,7 @@ exports.getEmployerSubscription = async (req, res) => {
       billingHistory
     });
     const { jobsUsed, totalJobs, remainingCredits, utilization } = planUsage;
+    const autoMail = await getEmployerAutoMailSummary({ employer, plan: effectivePlan });
 
     res.json({
       subscription: {
@@ -2021,7 +2028,8 @@ exports.getEmployerSubscription = async (req, res) => {
         applicationsLimit: 500, // standard display limit
         teamMembersCount,
         teamMembersLimit: 10,
-        daysRemaining
+        daysRemaining,
+        autoMail
       },
       stats: {
         activeJobs: activeJobsCount,
@@ -2105,6 +2113,7 @@ exports.selectEmployerPlan = async (req, res) => {
       remarks: 'Employer selected plan from subscription page.',
       recordedBy: 'Employer Portal'
     }));
+    await ensureEmployerAutoMailSetting({ employer: { ...employer, currentPlan: plan._id }, plan, resetUsage: true });
 
     res.json({ message: `${plan.planName} activated successfully.` });
   } catch (error) {
@@ -2172,6 +2181,43 @@ exports.getEmployerJobForm = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getEmployerAutoMailSettings = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const employer = await Employer.findOne({ $or: [{ userId }, { login: userId }], isDeleted: { $ne: true } }).populate('currentPlan').lean();
+    if (!employer) return res.status(404).json({ message: 'Employer profile was not found.' });
+    const summary = await getEmployerAutoMailSummary({ employer, plan: employer.currentPlan });
+    const categories = await JobCategory.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, categoryName: 1 }).lean();
+    const locations = await City.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ cityName: 1 }).limit(500).lean();
+    res.json({
+      settings: summary,
+      plan: employer.currentPlan ? {
+        id: employer.currentPlan._id,
+        name: employer.currentPlan.planName,
+        autoMailLimit: employer.currentPlan.autoMailLimit || 0
+      } : null,
+      filters: {
+        categories: categories.map(item => ({ id: item._id, name: item.categoryName })),
+        locations: locations.map(item => item.cityName).filter(Boolean)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateEmployerAutoMailSettings = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const employer = await Employer.findOne({ $or: [{ userId }, { login: userId }], isDeleted: { $ne: true } }).populate('currentPlan').lean();
+    if (!employer) return res.status(404).json({ message: 'Employer profile was not found.' });
+    const settings = await updateEmployerAutoMailSetting({ employer, plan: employer.currentPlan, payload: req.body || {} });
+    res.json({ message: 'Auto mail settings saved successfully.', settings });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
   }
 };
 
@@ -2535,8 +2581,13 @@ exports.createEmployerJob = async (req, res) => {
       ip: req.clientIp || '127.0.0.1',
       login: userId
     });
+    const autoMail = await sendEmployerJobAutoMails({
+      employer,
+      plan: activePlan,
+      job: job.toObject()
+    });
 
-    res.status(201).json({ message: 'Job published successfully.', job });
+    res.status(201).json({ message: 'Job published successfully.', job, autoMail });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -2695,10 +2746,10 @@ exports.getEmployerTalentPool = async (req, res) => {
     if (poolItems.length === 0) {
       const mockCandidates = [
         { name: 'Priya Sharma', email: 'priya@gmail.com', city: 'Bangalore', state: 'Karnataka', experience: '5+ Years', category: 'High Potential', skills: ['React', 'JS', 'TS'], phone: '9876543210', gender: 'Female' },
-        { name: 'Arjun Mehta', email: 'arjun@gmail.com', city: 'Pune', state: 'Maharashtra', experience: '2 - 5 Years', category: 'Technical Skills', skills: ['Python', 'Django', 'AWS'], phone: '9876543211', gender: 'Male' },
+        { name: 'Arjun Mehta', email: 'arjun@gmail.com', city: 'Pune', state: 'Maharashtra', experience: '2+ Years', category: 'Technical Skills', skills: ['Python', 'Django', 'AWS'], phone: '9876543211', gender: 'Male' },
         { name: 'Neha Singh', email: 'neha@gmail.com', city: 'Mumbai', state: 'Maharashtra', experience: '5+ Years', category: 'Leadership Quality', skills: ['UI/UX', 'Figma', 'Sketch'], phone: '9876543212', gender: 'Female' },
-        { name: 'Amit Verma', email: 'amit@gmail.com', city: 'Delhi', state: 'Delhi', experience: '2 - 5 Years', category: 'Cultural Fit', skills: ['Java', 'Spring', 'MySQL'], phone: '9876543213', gender: 'Male' },
-        { name: 'Sneha Gupta', email: 'sneha@gmail.com', city: 'Jaipur', state: 'Rajasthan', experience: '1 - 2 Years', category: 'Future Reference', skills: ['SEO', 'Content', 'Analytics'], phone: '9876543214', gender: 'Female' },
+        { name: 'Amit Verma', email: 'amit@gmail.com', city: 'Delhi', state: 'Delhi', experience: '2+ Years', category: 'Cultural Fit', skills: ['Java', 'Spring', 'MySQL'], phone: '9876543213', gender: 'Male' },
+        { name: 'Sneha Gupta', email: 'sneha@gmail.com', city: 'Jaipur', state: 'Rajasthan', experience: '1+ Years', category: 'Future Reference', skills: ['SEO', 'Content', 'Analytics'], phone: '9876543214', gender: 'Female' },
         { name: 'Vikram Patel', email: 'vikram@gmail.com', city: 'Ahmedabad', state: 'Gujarat', experience: '5+ Years', category: 'High Potential', skills: ['React', 'Node', 'MongoDB'], phone: '9876543215', gender: 'Male' },
         { name: 'Karan Malhotra', email: 'karan@gmail.com', city: 'Chandigarh', state: 'Punjab', experience: 'Fresher', category: 'Leadership Quality', skills: ['Python', 'ML', 'SQL'], phone: '9876543216', gender: 'Male' }
       ];

@@ -430,7 +430,8 @@ exports.updateJobseekerProfile = async (req, res) => {
       qualification,
       passingYear,
       studyField,
-      university
+      university,
+      jobSearchStatus
     } = req.body;
 
     // Update user's name
@@ -478,6 +479,7 @@ exports.updateJobseekerProfile = async (req, res) => {
     if (passingYear !== undefined) seeker.passingYear = passingYear;
     if (studyField !== undefined) seeker.studyField = studyField;
     if (university !== undefined) seeker.university = university;
+    if (jobSearchStatus !== undefined && ['looking', 'not-looking'].includes(jobSearchStatus)) seeker.jobSearchStatus = jobSearchStatus;
 
     // Handle Mongoose ObjectID references
     if (qualification) {

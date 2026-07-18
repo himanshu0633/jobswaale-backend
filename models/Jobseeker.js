@@ -88,6 +88,11 @@ const JobseekerSchema = new mongoose.Schema({
     enum: ['active', 'pending', 'blacklist'],
     default: 'active'
   },
+  jobSearchStatus: {
+    type: String,
+    enum: ['looking', 'not-looking'],
+    default: 'looking'
+  },
   blacklistReason: {
     type: String,
     default: ''

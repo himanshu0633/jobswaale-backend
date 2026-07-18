@@ -50,6 +50,10 @@ const PlanSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  autoMailLimit: {
+    type: Number,
+    default: 0
+  },
   showBadge: {
     type: Boolean,
     default: false
