@@ -16,6 +16,10 @@ const getSocketActor = (user) => {
   return '';
 };
 
+
+
+
+
 const canAccessApplication = async (user, actor, applicationId) => {
   const application = await Application.findById(applicationId)
     .populate('job', 'login')
