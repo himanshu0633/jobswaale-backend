@@ -69,6 +69,64 @@ const getPlanEndDate = (plan, startDate = new Date()) => {
   return addDays(startDate, validityDays[plan?.planValidity] || 30);
 };
 
+const getEmployerPlanUsage = async ({ userId, employerId, plan, allJobs = null, billingHistory = null }) => {
+  const planId = plan?._id || plan || null;
+  const planLimit = Number(plan?.freeJobPosts || 0);
+  const totalJobs = Array.isArray(allJobs)
+    ? allJobs.length
+    : await Job.countDocuments({ login: userId, isDeleted: { $ne: true } });
+  const getTime = (value) => {
+    const time = value ? new Date(value).getTime() : 0;
+    return Number.isNaN(time) ? 0 : time;
+  };
+
+  let payments = billingHistory;
+  if (!payments && planId) {
+    payments = await Payment.find({
+      $or: [
+        ...(employerId ? [{ customer: employerId }] : []),
+        { login: userId }
+      ],
+      paymentStatus: 'Success',
+      isDeleted: { $ne: true }
+    }).sort({ paymentDate: -1, createDate: -1 }).lean();
+  }
+
+  const sortedPayments = Array.isArray(payments)
+    ? [...payments].sort((a, b) => {
+        const bTime = Math.max(getTime(b.validFrom), getTime(b.paymentDate), getTime(b.createDate));
+        const aTime = Math.max(getTime(a.validFrom), getTime(a.paymentDate), getTime(a.createDate));
+        return bTime - aTime;
+      })
+    : [];
+
+  const latestPlanPayment = planId
+    ? (sortedPayments.find((payment) => String(payment.plan || '') === String(planId)) || sortedPayments[0] || null)
+    : null;
+  const subscriptionStart = latestPlanPayment?.validFrom || latestPlanPayment?.paymentDate || latestPlanPayment?.createDate || null;
+  const currentPlanJobFilter = {
+    login: userId,
+    isDeleted: { $ne: true }
+  };
+
+  if (planId) currentPlanJobFilter.currentPlan = planId;
+  if (subscriptionStart) currentPlanJobFilter.createDate = { $gte: new Date(subscriptionStart) };
+
+  const jobsUsed = planId
+    ? await Job.countDocuments(currentPlanJobFilter)
+    : totalJobs;
+  const remainingCredits = Math.max(planLimit - jobsUsed, 0);
+  const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
+
+  return {
+    jobsUsed,
+    totalJobs,
+    remainingCredits,
+    utilization,
+    subscriptionStart
+  };
+};
+
 const splitList = (value) => {
   if (Array.isArray(value)) return value.map(item => String(item).trim()).filter(Boolean);
   return String(value || '').split(',').map(item => item.trim()).filter(Boolean);
@@ -1517,9 +1575,13 @@ exports.getEmployerDashboard = async (req, res) => {
 
     const plan = employer?.currentPlan || defaultPlan || jobs.find(job => job.currentPlan)?.currentPlan || null;
     const planLimit = Number(plan?.freeJobPosts || 0);
-    const jobsUsed = allJobs.length;
-    const remainingCredits = Math.max(planLimit - jobsUsed, 0);
-    const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
+    const planUsage = await getEmployerPlanUsage({
+      userId,
+      employerId: employer?._id,
+      plan,
+      allJobs
+    });
+    const { jobsUsed, remainingCredits, utilization } = planUsage;
 
     // Ensure applications are seeded
     await ensureApplicationsExist(userId);
@@ -1663,7 +1725,7 @@ exports.getEmployerProfile = async (req, res) => {
     const allJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).lean();
     const jobIds = allJobs.map(j => j._id);
 
-    const activeJobsCount = allJobs.filter(j => j.status === 'Active').length;
+    const activeJobsCount = allJobs.filter(j => String(j.status || '').toLowerCase() === 'active').length;
     const hiredCount = await Application.countDocuments({ job: { $in: jobIds }, status: 'Offered' });
 
     const plan = employer?.currentPlan || null;
@@ -1672,9 +1734,13 @@ exports.getEmployerProfile = async (req, res) => {
       : null;
     const effectivePlan = plan || defaultPlan;
     const planLimit = Number(effectivePlan?.freeJobPosts || 0);
-    const jobsUsed = allJobs.length;
-    const remainingCredits = Math.max(planLimit - jobsUsed, 0);
-    const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
+    const planUsage = await getEmployerPlanUsage({
+      userId,
+      employerId: employer?._id,
+      plan: effectivePlan,
+      allJobs
+    });
+    const { jobsUsed, remainingCredits, utilization } = planUsage;
 
     const [industries, states, districts, cities, countries] = await Promise.all([
       IndustryType.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).lean(),
@@ -1894,7 +1960,7 @@ exports.getEmployerSubscription = async (req, res) => {
     const allJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).lean();
     const jobIds = allJobs.map(j => j._id);
 
-    const activeJobsCount = allJobs.filter(j => j.status === 'Active').length;
+    const activeJobsCount = allJobs.filter(j => String(j.status || '').toLowerCase() === 'active').length;
     const applicationsCount = await Application.countDocuments({ job: { $in: jobIds } });
     const teamMembersCount = employer?.teamMembers?.length || 1;
 
@@ -1904,9 +1970,6 @@ exports.getEmployerSubscription = async (req, res) => {
       : null;
     const effectivePlan = plan || defaultPlan;
     const planLimit = Number(effectivePlan?.freeJobPosts || 0);
-    const jobsUsed = allJobs.length;
-    const remainingCredits = Math.max(planLimit - jobsUsed, 0);
-    const utilization = planLimit > 0 ? Math.min(Math.round((jobsUsed / planLimit) * 100), 100) : 0;
 
     let daysRemaining = 0;
     if (employer?.planValidity) {
@@ -1934,6 +1997,15 @@ exports.getEmployerSubscription = async (req, res) => {
       isDeleted: { $ne: true }
     }).sort({ paymentDate: -1 }).lean();
 
+    const planUsage = await getEmployerPlanUsage({
+      userId,
+      employerId: employer?._id,
+      plan: effectivePlan,
+      allJobs,
+      billingHistory
+    });
+    const { jobsUsed, totalJobs, remainingCredits, utilization } = planUsage;
+
     res.json({
       subscription: {
         currentPlanId: effectivePlan?._id || null,
@@ -1941,6 +2013,7 @@ exports.getEmployerSubscription = async (req, res) => {
         status: employer?.status === 'blacklist' ? 'Inactive' : 'Active',
         validUntil: employer?.planValidity || effectivePlan?.endDate || null,
         jobsUsed,
+        totalJobs,
         jobLimit: planLimit,
         remainingCredits,
         utilization,
@@ -1952,6 +2025,7 @@ exports.getEmployerSubscription = async (req, res) => {
       },
       stats: {
         activeJobs: activeJobsCount,
+        totalJobs,
         applications: applicationsCount,
         teamMembers: teamMembersCount,
         daysRemaining
@@ -2346,7 +2420,11 @@ exports.createEmployerJob = async (req, res) => {
     }).lean() : null;
     if (activePlan) {
       const planLimit = Number(activePlan.freeJobPosts || 0);
-      const jobsUsed = await Job.countDocuments({ login: userId, isDeleted: { $ne: true } });
+      const { jobsUsed } = await getEmployerPlanUsage({
+        userId,
+        employerId: employer?._id,
+        plan: activePlan
+      });
       if (jobsUsed >= planLimit) {
         return res.status(403).json({
           message: `Your ${activePlan.planName} plan allows ${planLimit} job post${planLimit === 1 ? '' : 's'}. Please upgrade your plan to post more jobs.`

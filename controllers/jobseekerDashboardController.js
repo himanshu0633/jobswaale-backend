@@ -41,33 +41,86 @@ const clearGoogleDummyProfileValues = (seeker) => {
 };
 
 const getJobseekerProfileCompletion = (seeker = {}) => {
-  const requiredFields = [
+  const hasValue = (value) => {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value && typeof value === 'object') return Boolean(value._id || value.id || value.name || value.industryType || value.categoryName || value.jobType);
+    return Boolean(String(value || '').trim());
+  };
+
+  const profileFields = [
     { key: 'name', label: 'Full name' },
+    { key: 'email', label: 'Email address', getValue: (profile) => profile.userId?.email || profile.email },
     { key: 'phone', label: 'Phone number' },
     { key: 'gender', label: 'Gender' },
+    { key: 'dob', label: 'Date of birth' },
     { key: 'qualification', label: 'Qualification' },
     { key: 'designation', label: 'Current role' },
     { key: 'experience', label: 'Experience' },
+    { key: 'expectedSalary', label: 'Expected salary' },
+    { key: 'industryType', label: 'Industry type' },
+    { key: 'jobCategory', label: 'Job category' },
+    { key: 'jobType', label: 'Job type' },
+    { key: 'skills', label: 'Skills' },
+    { key: 'preferredLocation', label: 'Preferred location' },
     { key: 'country', label: 'Country' },
     { key: 'state', label: 'State' },
-    { key: 'city', label: 'City' }
+    { key: 'district', label: 'District' },
+    { key: 'city', label: 'City' },
+    { key: 'address', label: 'Address' },
+    { key: 'pinCode', label: 'Pincode' }
+  ];
+  const socialFields = [
+    { key: 'linkedin', label: 'LinkedIn profile' },
+    { key: 'portfolio', label: 'Portfolio website' },
+    { key: 'github', label: 'GitHub profile' }
   ];
 
-  const missingFields = requiredFields
-    .filter(({ key }) => {
-      const value = seeker[key];
-      if (Array.isArray(value)) return value.length === 0;
-      if (value && typeof value === 'object') return !value._id && !value.id && !value.name;
-      return !String(value || '').trim();
-    })
+  const profileMissingFields = profileFields
+    .filter(({ key, getValue }) => !hasValue(getValue ? getValue(seeker) : seeker[key]))
     .map(({ label }) => label);
-  const completedFields = requiredFields.length - missingFields.length;
-  const profileCompletionScore = Math.round((completedFields / requiredFields.length) * 100);
+  const socialMissingFields = socialFields
+    .filter(({ key }) => !hasValue(seeker[key]))
+    .map(({ label }) => label);
+
+  const profileCompletedFields = profileFields.length - profileMissingFields.length;
+  const socialCompletedFields = socialFields.length - socialMissingFields.length;
+  const resumeCompleted = hasValue(seeker.resume);
+  const profileFieldsScore = (profileCompletedFields / profileFields.length) * 87;
+  const socialLinksScore = (socialCompletedFields / socialFields.length) * 3;
+  const resumeScore = resumeCompleted ? 10 : 0;
+  const profileCompletionScore = Math.round(profileFieldsScore + socialLinksScore + resumeScore);
+  const missingFields = [
+    ...profileMissingFields,
+    ...socialMissingFields,
+    ...(resumeCompleted ? [] : ['Resume'])
+  ];
 
   return {
     profileIncomplete: missingFields.length > 0,
     profileCompletionScore,
-    profileMissingFields: missingFields
+    profileMissingFields: missingFields,
+    profileCompletionBreakdown: {
+      profileFields: {
+        completed: profileCompletedFields,
+        total: profileFields.length,
+        maxScore: 87,
+        perFieldScore: Number((87 / profileFields.length).toFixed(2)),
+        score: Number(profileFieldsScore.toFixed(2))
+      },
+      socialLinks: {
+        completed: socialCompletedFields,
+        total: socialFields.length,
+        maxScore: 3,
+        perFieldScore: 1,
+        score: Number(socialLinksScore.toFixed(2))
+      },
+      resume: {
+        completed: resumeCompleted ? 1 : 0,
+        total: 1,
+        maxScore: 10,
+        score: resumeScore
+      }
+    }
   };
 };
 
