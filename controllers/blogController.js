@@ -141,7 +141,7 @@ exports.createBlog = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await Blog.findOne({ sortingNo: Number(sortingNo) });
+      const sortExists = await Blog.findOne({ sortingNo: Number(sortingNo), isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }
@@ -200,7 +200,7 @@ exports.updateBlog = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await Blog.findOne({ sortingNo: Number(sortingNo), _id: { $ne: id } });
+      const sortExists = await Blog.findOne({ sortingNo: Number(sortingNo), _id: { $ne: id }, isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }

@@ -1,4 +1,6 @@
 const Job = require('../models/Job');
+const Employer = require('../models/Employer');
+const mongoose = require('mongoose');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
 const Application = require('../models/Application');
@@ -27,6 +29,27 @@ exports.getJobs = async (req, res) => {
     const filter = { isDeleted: { $ne: true } };
     if (!isAdmin) {
       filter.status = { $in: ['active', 'featured'] };
+    }
+    if (req.query.employer) {
+      if (!mongoose.Types.ObjectId.isValid(req.query.employer)) {
+        return res.json([]);
+      }
+
+      const employer = await Employer.findOne({
+        _id: req.query.employer,
+        isDeleted: { $ne: true },
+        status: 'active'
+      }).lean();
+
+      if (!employer) {
+        return res.json([]);
+      }
+
+      const loginIds = [employer.login, employer.userId].filter(Boolean);
+      filter.$or = [
+        ...(loginIds.length ? [{ login: { $in: loginIds } }] : []),
+        ...(employer.companyName ? [{ companyName: employer.companyName }] : [])
+      ];
     }
 
     const list = await Job.find(filter)

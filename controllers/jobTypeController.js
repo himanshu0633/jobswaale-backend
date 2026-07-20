@@ -66,7 +66,7 @@ exports.createJobType = async (req, res) => {
       return res.status(400).json({ message: 'Record with this ID already exists' });
     }
 
-    const nameExists = await JobType.findOne(caseInsensitiveExactFilter('jobType', cleanJobType));
+    const nameExists = await JobType.findOne(caseInsensitiveExactFilter('jobType', cleanJobType, { isDeleted: { $ne: true } }));
     if (nameExists) {
       return res.status(400).json({ message: 'Job type with this Name already exists' });
     }
@@ -75,7 +75,7 @@ exports.createJobType = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await JobType.findOne({ sortingNo: Number(sortingNo) });
+      const sortExists = await JobType.findOne({ sortingNo: Number(sortingNo), isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }
@@ -96,7 +96,7 @@ exports.updateJobType = async (req, res) => {
 
     const cleanJobType = jobType ? jobType.trim() : jobType;
     if (cleanJobType) {
-      const duplicate = await JobType.findOne(caseInsensitiveExactFilter('jobType', cleanJobType, { _id: { $ne: uid } }));
+      const duplicate = await JobType.findOne(caseInsensitiveExactFilter('jobType', cleanJobType, { _id: { $ne: uid }, isDeleted: { $ne: true } }));
       if (duplicate) {
         return res.status(400).json({ message: 'Job type with this Name already exists' });
       }
@@ -106,7 +106,7 @@ exports.updateJobType = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await JobType.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid } });
+      const sortExists = await JobType.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid }, isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }

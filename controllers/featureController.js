@@ -65,7 +65,7 @@ exports.createFeature = async (req, res) => {
       return res.status(400).json({ message: 'Record with this ID already exists' });
     }
 
-    const nameExists = await Feature.findOne(caseInsensitiveExactFilter('featureName', cleanFeatureName));
+    const nameExists = await Feature.findOne(caseInsensitiveExactFilter('featureName', cleanFeatureName, { isDeleted: { $ne: true } }));
     if (nameExists) {
       return res.status(400).json({ message: 'Feature with this Name already exists' });
     }
@@ -74,7 +74,7 @@ exports.createFeature = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (displayOrder !== undefined && displayOrder !== null && displayOrder !== '') {
-      const sortExists = await Feature.findOne({ displayOrder: Number(displayOrder) });
+      const sortExists = await Feature.findOne({ displayOrder: Number(displayOrder), isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }
@@ -95,7 +95,7 @@ exports.updateFeature = async (req, res) => {
 
     const cleanFeatureName = featureName ? featureName.trim() : featureName;
     if (cleanFeatureName) {
-      const duplicate = await Feature.findOne(caseInsensitiveExactFilter('featureName', cleanFeatureName, { _id: { $ne: uid } }));
+      const duplicate = await Feature.findOne(caseInsensitiveExactFilter('featureName', cleanFeatureName, { _id: { $ne: uid }, isDeleted: { $ne: true } }));
       if (duplicate) {
         return res.status(400).json({ message: 'Feature with this Name already exists' });
       }
@@ -105,7 +105,7 @@ exports.updateFeature = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (displayOrder !== undefined && displayOrder !== null && displayOrder !== '') {
-      const sortExists = await Feature.findOne({ displayOrder: Number(displayOrder), _id: { $ne: uid } });
+      const sortExists = await Feature.findOne({ displayOrder: Number(displayOrder), _id: { $ne: uid }, isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }

@@ -65,7 +65,7 @@ exports.createJobCategory = async (req, res) => {
       return res.status(400).json({ message: 'Record with this ID already exists' });
     }
 
-    const nameExists = await JobCategory.findOne(caseInsensitiveExactFilter('categoryName', cleanCategoryName));
+    const nameExists = await JobCategory.findOne(caseInsensitiveExactFilter('categoryName', cleanCategoryName, { isDeleted: { $ne: true } }));
     if (nameExists) {
       return res.status(400).json({ message: 'Job category with this Name already exists' });
     }
@@ -74,7 +74,7 @@ exports.createJobCategory = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await JobCategory.findOne({ sortingNo: Number(sortingNo) });
+      const sortExists = await JobCategory.findOne({ sortingNo: Number(sortingNo), isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }
@@ -95,7 +95,7 @@ exports.updateJobCategory = async (req, res) => {
 
     const cleanCategoryName = categoryName ? categoryName.trim() : categoryName;
     if (cleanCategoryName) {
-      const duplicate = await JobCategory.findOne(caseInsensitiveExactFilter('categoryName', cleanCategoryName, { _id: { $ne: uid } }));
+      const duplicate = await JobCategory.findOne(caseInsensitiveExactFilter('categoryName', cleanCategoryName, { _id: { $ne: uid }, isDeleted: { $ne: true } }));
       if (duplicate) {
         return res.status(400).json({ message: 'Job category with this Name already exists' });
       }
@@ -105,7 +105,7 @@ exports.updateJobCategory = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await JobCategory.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid } });
+      const sortExists = await JobCategory.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid }, isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }

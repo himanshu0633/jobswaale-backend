@@ -66,7 +66,7 @@ exports.createIndustryType = async (req, res) => {
       return res.status(400).json({ message: 'Record with this ID already exists' });
     }
 
-    const nameExists = await IndustryType.findOne(caseInsensitiveExactFilter('industryType', cleanIndustryType));
+    const nameExists = await IndustryType.findOne(caseInsensitiveExactFilter('industryType', cleanIndustryType, { isDeleted: { $ne: true } }));
     if (nameExists) {
       return res.status(400).json({ message: 'Industry type with this Name already exists' });
     }
@@ -75,7 +75,7 @@ exports.createIndustryType = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await IndustryType.findOne({ sortingNo: Number(sortingNo) });
+      const sortExists = await IndustryType.findOne({ sortingNo: Number(sortingNo), isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }
@@ -96,7 +96,7 @@ exports.updateIndustryType = async (req, res) => {
 
     const cleanIndustryType = industryType ? industryType.trim() : industryType;
     if (cleanIndustryType) {
-      const duplicate = await IndustryType.findOne(caseInsensitiveExactFilter('industryType', cleanIndustryType, { _id: { $ne: uid } }));
+      const duplicate = await IndustryType.findOne(caseInsensitiveExactFilter('industryType', cleanIndustryType, { _id: { $ne: uid }, isDeleted: { $ne: true } }));
       if (duplicate) {
         return res.status(400).json({ message: 'Industry type with this Name already exists' });
       }
@@ -106,7 +106,7 @@ exports.updateIndustryType = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await IndustryType.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid } });
+      const sortExists = await IndustryType.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid }, isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }

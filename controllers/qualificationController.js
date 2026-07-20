@@ -65,7 +65,7 @@ exports.createQualification = async (req, res) => {
       return res.status(400).json({ message: 'Record with this ID already exists' });
     }
 
-    const nameExists = await Qualification.findOne(caseInsensitiveExactFilter('name', cleanName));
+    const nameExists = await Qualification.findOne(caseInsensitiveExactFilter('name', cleanName, { isDeleted: { $ne: true } }));
     if (nameExists) {
       return res.status(400).json({ message: 'Qualification with this Name already exists' });
     }
@@ -74,7 +74,7 @@ exports.createQualification = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await Qualification.findOne({ sortingNo: Number(sortingNo) });
+      const sortExists = await Qualification.findOne({ sortingNo: Number(sortingNo), isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }
@@ -95,7 +95,7 @@ exports.updateQualification = async (req, res) => {
 
     const cleanName = name ? name.trim() : name;
     if (cleanName) {
-      const duplicate = await Qualification.findOne(caseInsensitiveExactFilter('name', cleanName, { _id: { $ne: uid } }));
+      const duplicate = await Qualification.findOne(caseInsensitiveExactFilter('name', cleanName, { _id: { $ne: uid }, isDeleted: { $ne: true } }));
       if (duplicate) {
         return res.status(400).json({ message: 'Qualification with this Name already exists' });
       }
@@ -105,7 +105,7 @@ exports.updateQualification = async (req, res) => {
     if (sortError) return res.status(400).json({ message: sortError });
 
     if (sortingNo !== undefined && sortingNo !== null && sortingNo !== '') {
-      const sortExists = await Qualification.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid } });
+      const sortExists = await Qualification.findOne({ sortingNo: Number(sortingNo), _id: { $ne: uid }, isDeleted: { $ne: true } });
       if (sortExists) {
         return res.status(400).json({ message: 'Sort number is already taken. Please enter another number.' });
       }
