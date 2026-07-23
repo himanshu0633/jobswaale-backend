@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { uploadMessageAttachment } = require('../middleware/messageUpload');
+const { uploadResumeFile } = require('../middleware/resumeUpload');
 const {
   listJobseekerMessages,
   getJobseekerUnreadCount,
@@ -18,7 +19,9 @@ const {
   getJobseekerSavedJobs,
   toggleSaveJob,
   getJobseekerSavedEmployers,
-  toggleSaveEmployer
+  toggleSaveEmployer,
+  uploadJobseekerResume,
+  deleteJobseekerResume
 } = require('../controllers/jobseekerDashboardController');
 
 // Middleware to ensure the user is a Jobseeker
@@ -37,6 +40,8 @@ router.use(protect, authorizeJobseeker);
 router.get('/dashboard', getJobseekerDashboard);
 router.get('/profile', getJobseekerProfile);
 router.put('/profile', updateJobseekerProfile);
+router.post('/profile/resume', uploadResumeFile, uploadJobseekerResume);
+router.delete('/profile/resume', deleteJobseekerResume);
 router.get('/subscription', getJobseekerSubscription);
 router.post('/subscription/select-plan', selectJobseekerPlan);
 router.get('/applications', getJobseekerApplications);

@@ -81,6 +81,8 @@ app.use('/api/jobs', require('./routes/jobRoutes'));
 app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/payments', require('./routes/transactionRoutes'));
 app.use('/api/reports', require('./routes/reportRoutes'));
+app.use('/api/cron', require('./routes/cronRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
 
 
 // Root endpoint

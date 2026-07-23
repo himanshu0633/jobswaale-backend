@@ -900,3 +900,83 @@ exports.toggleSaveEmployer = async (req, res) => {
     res.status(500).json({ message: 'Server error saving employer' });
   }
 };
+
+// 11. Upload Resume
+exports.uploadJobseekerResume = async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const userId = req.user._id;
+    const seeker = await ensureJobseekerExists(userId);
+    if (!seeker) {
+      return res.status(404).json({ message: 'Jobseeker profile not found' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'Please upload a file' });
+    }
+
+    // Delete old resume file if exists
+    if (seeker.resume) {
+      try {
+        const oldFilename = seeker.resume.split('/').pop();
+        const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
+        const oldFilePath = isVercel
+          ? path.join('/tmp', 'uploads', 'resumes', oldFilename)
+          : path.join(__dirname, '..', 'uploads', 'resumes', oldFilename);
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+        }
+      } catch (err) {
+        console.error('Failed to delete old resume:', err);
+      }
+    }
+
+    seeker.resume = `${req.protocol}://${req.get('host')}/uploads/resumes/${req.file.filename}`;
+    await seeker.save();
+
+    res.json({
+      message: 'Resume uploaded successfully',
+      resume: seeker.resume
+    });
+  } catch (error) {
+    console.error('Upload Resume Error:', error);
+    res.status(500).json({ message: 'Server error uploading resume' });
+  }
+};
+
+// 12. Delete Resume
+exports.deleteJobseekerResume = async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const userId = req.user._id;
+    const seeker = await ensureJobseekerExists(userId);
+    if (!seeker) {
+      return res.status(404).json({ message: 'Jobseeker profile not found' });
+    }
+
+    if (seeker.resume) {
+      try {
+        const filename = seeker.resume.split('/').pop();
+        const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
+        const filePath = isVercel
+          ? path.join('/tmp', 'uploads', 'resumes', filename)
+          : path.join(__dirname, '..', 'uploads', 'resumes', filename);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (err) {
+        console.error('Failed to delete resume file:', err);
+      }
+    }
+
+    seeker.resume = '';
+    await seeker.save();
+
+    res.json({ message: 'Resume deleted successfully' });
+  } catch (error) {
+    console.error('Delete Resume Error:', error);
+    res.status(500).json({ message: 'Server error deleting resume' });
+  }
+};

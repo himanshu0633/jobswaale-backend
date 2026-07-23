@@ -126,6 +126,20 @@ exports.createJob = async (req, res) => {
     });
 
     await job.save();
+    
+    // Send email to employer and alert jobseekers
+    const { sendJobPostedEmail, notifyMatchingJobseekers } = require('../utils/jobNotifications');
+    if (job.status === 'active') {
+      sendJobPostedEmail({
+        to: job.email || req.user.email,
+        employerName: job.contactPerson || job.companyName || req.user.firstName || 'Employer',
+        jobTitle: job.jobTitle,
+        recipientId: req.user?._id || job.login
+      }).catch(err => console.error('Failed to send job posted email:', err));
+
+      notifyMatchingJobseekers(job).catch(err => console.error('Failed to notify matching jobseekers:', err));
+    }
+
     const settings = await getSettings();
     await sendAdminNotification({
       enabled: settings.notifNewJob,
@@ -210,6 +224,19 @@ exports.updateJob = async (req, res) => {
       },
       { returnDocument: 'after' }
     );
+
+    // Send email to employer and alert jobseekers on activation
+    const { sendJobPostedEmail, notifyMatchingJobseekers } = require('../utils/jobNotifications');
+    if (updated.status === 'active' && job.status !== 'active') {
+      sendJobPostedEmail({
+        to: updated.email || req.user.email,
+        employerName: updated.contactPerson || updated.companyName || req.user.firstName || 'Employer',
+        jobTitle: updated.jobTitle,
+        recipientId: req.user?._id || updated.login
+      }).catch(err => console.error('Failed to send job posted email:', err));
+
+      notifyMatchingJobseekers(updated).catch(err => console.error('Failed to notify matching jobseekers:', err));
+    }
 
     res.json(updated);
   } catch (error) {
@@ -430,6 +457,21 @@ exports.applyJob = async (req, res) => {
       matchScore
     });
     await app.save();
+
+    // Send email alert to employer
+    const { sendEmployerNewApplicationEmail } = require('../utils/jobNotifications');
+    const User = require('../models/User');
+    User.findById(job.login).select('email firstName').then(employerUser => {
+      if (employerUser && employerUser.email) {
+        sendEmployerNewApplicationEmail({
+          to: employerUser.email,
+          employerName: employerUser.firstName || 'Employer',
+          jobTitle: job.jobTitle,
+          candidateName: seeker.name,
+          recipientId: employerUser._id
+        }).catch(err => console.error('Failed to send application email to employer:', err));
+      }
+    }).catch(err => console.error('Failed to query employer for application email:', err));
 
     res.status(201).json({ message: 'Applied successfully', application: app });
   } catch (error) {

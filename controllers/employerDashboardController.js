@@ -2628,6 +2628,33 @@ exports.updateApplicationStatus = async (req, res) => {
     }
     await application.save();
 
+    // Send application status update email to jobseeker
+    const { sendApplicationStatusEmail } = require('../utils/jobNotifications');
+    (async () => {
+      try {
+        const fullApp = await Application.findById(application._id)
+          .populate({
+            path: 'candidate',
+            populate: { path: 'userId', select: 'email' }
+          })
+          .populate('job', 'jobTitle companyName')
+          .lean();
+        const candidateUserId = fullApp?.candidate?.userId?._id || fullApp?.candidate?.userId;
+        if (fullApp?.candidate?.userId?.email && candidateUserId) {
+          await sendApplicationStatusEmail({
+            to: fullApp.candidate.userId.email,
+            seekerName: fullApp.candidate.name,
+            jobTitle: fullApp.job?.jobTitle || 'Job Position',
+            companyName: fullApp.job?.companyName || 'Employer',
+            status: fullApp.status,
+            recipientId: candidateUserId
+          });
+        }
+      } catch (err) {
+        console.error('Error sending application status update email:', err);
+      }
+    })();
+
     res.json({ message: `Candidate status updated to ${status} successfully.`, application });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -2677,6 +2704,33 @@ exports.updateSelectedOffer = async (req, res) => {
 
     await application.save();
 
+    // Send application status update email to jobseeker
+    const { sendApplicationStatusEmail } = require('../utils/jobNotifications');
+    (async () => {
+      try {
+        const fullApp = await Application.findById(application._id)
+          .populate({
+            path: 'candidate',
+            populate: { path: 'userId', select: 'email' }
+          })
+          .populate('job', 'jobTitle companyName')
+          .lean();
+        const candidateUserId = fullApp?.candidate?.userId?._id || fullApp?.candidate?.userId;
+        if (fullApp?.candidate?.userId?.email && candidateUserId) {
+          await sendApplicationStatusEmail({
+            to: fullApp.candidate.userId.email,
+            seekerName: fullApp.candidate.name,
+            jobTitle: fullApp.job?.jobTitle || 'Job Position',
+            companyName: fullApp.job?.companyName || 'Employer',
+            status: `${fullApp.status} (${offerStatus})`,
+            recipientId: candidateUserId
+          });
+        }
+      } catch (err) {
+        console.error('Error sending application status update email:', err);
+      }
+    })();
+
     res.json({ message: `Offer status updated to ${offerStatus}.`, application });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -2711,6 +2765,33 @@ exports.scheduleApplicationInterview = async (req, res) => {
     };
 
     await application.save();
+
+    // Send application status update email to jobseeker
+    const { sendApplicationStatusEmail } = require('../utils/jobNotifications');
+    (async () => {
+      try {
+        const fullApp = await Application.findById(application._id)
+          .populate({
+            path: 'candidate',
+            populate: { path: 'userId', select: 'email' }
+          })
+          .populate('job', 'jobTitle companyName')
+          .lean();
+        const candidateUserId = fullApp?.candidate?.userId?._id || fullApp?.candidate?.userId;
+        if (fullApp?.candidate?.userId?.email && candidateUserId) {
+          await sendApplicationStatusEmail({
+            to: fullApp.candidate.userId.email,
+            seekerName: fullApp.candidate.name,
+            jobTitle: fullApp.job?.jobTitle || 'Job Position',
+            companyName: fullApp.job?.companyName || 'Employer',
+            status: 'Interview Scheduled',
+            recipientId: candidateUserId
+          });
+        }
+      } catch (err) {
+        console.error('Error sending application status update email:', err);
+      }
+    })();
 
     res.json({ message: 'Interview scheduled successfully.', application });
   } catch (error) {

@@ -312,6 +312,23 @@ const sendMessage = (actor) => async (req, res) => {
     const recipientUserId = actor === 'employer'
       ? application.candidate.userId?._id || application.candidate.userId
       : application.job.login;
+
+    // Send in-app notification to the recipient for the new message
+    const { createAndSendNotification } = require('../utils/jobNotifications');
+    const senderName = actor === 'employer'
+      ? (application.job.companyName || 'Employer')
+      : application.candidate.name;
+
+    if (recipientUserId) {
+      await createAndSendNotification({
+        recipientId: recipientUserId,
+        title: 'New Chat Message',
+        message: `You received a new message from ${senderName}: "${(body || attachment?.originalName || 'Attachment').slice(0, 80)}"`,
+        type: 'general',
+        redirectUrl: actor === 'employer' ? `/jobseeker/messages` : `/employer/messages`
+      });
+    }
+
     const io = getIO();
     const senderThread = await buildThreadSummary(application, actor);
     const recipientThread = await buildThreadSummary(application, recipientRole);
