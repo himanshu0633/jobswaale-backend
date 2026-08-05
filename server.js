@@ -47,6 +47,23 @@ app.get('/uploads/messages/:filename', async (req, res, next) => {
   }
 });
 
+app.get('/uploads/resumes/:filename', async (req, res, next) => {
+  try {
+    const Attachment = require('./models/Attachment');
+    const file = await Attachment.findOne({ filename: req.params.filename });
+    if (!file) {
+      return next();
+    }
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Length', file.size);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    return res.send(file.data);
+  } catch (err) {
+    console.error('Fetch resume error:', err);
+    next(err);
+  }
+});
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
 if (isVercel) {
@@ -92,8 +109,16 @@ app.get('/', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ message: 'Something went wrong on the server', error: err.message });
+  console.error('Server Error:', {
+    message: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
+    url: req.originalUrl,
+    method: req.method
+  });
+
+  res.status(err.status || 500).json({
+    message: err.message || 'Something went wrong on the server'
+  });
 });
 
 const PORT = process.env.PORT || 5000;

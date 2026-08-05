@@ -12,6 +12,7 @@ const IndustryType = require('../models/IndustryType');
 const PlanMapping = require('../models/PlanMapping');
 const Feature = require('../models/Feature');
 const Employer = require('../models/Employer');
+const Attachment = require('../models/Attachment');
 const { findDuplicateMobile, validateMobileNumber } = require('../utils/userCredentials');
 
 const GOOGLE_PROFILE_DUMMY_VALUES = {
@@ -122,6 +123,64 @@ const getJobseekerProfileCompletion = (seeker = {}) => {
       }
     }
   };
+};
+
+const toMonthIndex = (value, fallback) => {
+  if (!value) return fallback;
+  const match = String(value).match(/^(\d{4})-(\d{2})/);
+  if (!match) return fallback;
+  return Number(match[1]) * 12 + Number(match[2]);
+};
+
+const normalizeExperiences = (experiences = []) => {
+  if (!Array.isArray(experiences)) return [];
+
+  return experiences
+    .map(item => ({
+      position: String(item?.position || item?.title || '').trim(),
+      company: String(item?.company || '').trim(),
+      employmentType: String(item?.employmentType || 'Full-time').trim(),
+      startDate: String(item?.startDate || '').slice(0, 7),
+      endDate: item?.currentlyWorking ? '' : String(item?.endDate || '').slice(0, 7),
+      currentlyWorking: Boolean(item?.currentlyWorking),
+      description: String(item?.description || item?.body || '').trim()
+    }))
+    .filter(item => item.position || item.company || item.startDate || item.endDate || item.description);
+};
+
+const validateExperiencePeriods = (experiences = []) => {
+  const normalized = normalizeExperiences(experiences);
+  const ranges = normalized.map((item, index) => {
+    if (!item.position || !item.company || !item.startDate) {
+      return { error: `Experience ${index + 1}: position, company, and start date are required.` };
+    }
+    const start = toMonthIndex(item.startDate, NaN);
+    const end = item.currentlyWorking ? Number.MAX_SAFE_INTEGER : toMonthIndex(item.endDate, NaN);
+    if (!Number.isFinite(start)) {
+      return { error: `Experience ${index + 1}: valid start date is required.` };
+    }
+    if (!item.currentlyWorking && !Number.isFinite(end)) {
+      return { error: `Experience ${index + 1}: valid end date is required.` };
+    }
+    if (end < start) {
+      return { error: `Experience ${index + 1}: end date cannot be before start date.` };
+    }
+    return { ...item, start, end };
+  });
+
+  const invalid = ranges.find(item => item.error);
+  if (invalid) return { error: invalid.error };
+
+  for (let i = 0; i < ranges.length; i += 1) {
+    for (let j = i + 1; j < ranges.length; j += 1) {
+      const overlaps = ranges[i].start <= ranges[j].end && ranges[j].start <= ranges[i].end;
+      if (overlaps) {
+        return { error: 'Two experiences cannot have the same or overlapping time period.' };
+      }
+    }
+  }
+
+  return { experiences: normalized };
 };
 
 // Helper to ensure a Jobseeker document exists for a user
@@ -417,6 +476,7 @@ exports.updateJobseekerProfile = async (req, res) => {
       designation,
       relocate,
       experience,
+      experiences,
       expectedSalary,
       preferredLocation,
       industryType,
@@ -469,6 +529,13 @@ exports.updateJobseekerProfile = async (req, res) => {
     if (designation !== undefined) seeker.designation = designation;
     if (relocate !== undefined) seeker.relocate = relocate;
     if (experience !== undefined) seeker.experience = experience;
+    if (experiences !== undefined) {
+      const result = validateExperiencePeriods(experiences);
+      if (result.error) {
+        return res.status(400).json({ message: result.error });
+      }
+      seeker.experiences = result.experiences;
+    }
     if (expectedSalary !== undefined) seeker.expectedSalary = expectedSalary;
     if (preferredLocation !== undefined) seeker.preferredLocation = preferredLocation;
     if (bio !== undefined) seeker.bio = bio;
@@ -483,7 +550,9 @@ exports.updateJobseekerProfile = async (req, res) => {
 
     // Handle Mongoose ObjectID references
     if (qualification) {
-      let qualDoc = await Qualification.findById(qualification);
+      let qualDoc = mongoose.Types.ObjectId.isValid(qualification)
+        ? await Qualification.findById(qualification)
+        : null;
       if (!qualDoc) {
         qualDoc = await Qualification.findOne({ name: qualification });
         if (!qualDoc) qualDoc = await Qualification.create({ name: qualification });
@@ -707,8 +776,11 @@ exports.getJobseekerApplications = async (req, res) => {
         initial: job.companyName?.charAt(0).toUpperCase() || 'C',
         color: ['#e63946', '#1d70b8', '#2e7d32', '#e67e22', '#8e44ad'][index % 5],
         location: [job.city, job.state].filter(Boolean).join(', ') || 'N/A',
+        jobType: job.jobType?.jobType || 'Full-time',
+        matchScore: app.matchScore || 0,
         appliedOn: new Date(appliedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
-        status: String(app.status || 'Applied').toLowerCase() === 'offered' ? 'shortlisted' : String(app.status || 'Applied').toLowerCase() // Map offered -> shortlisted or pending matching UI
+        appliedDate,
+        status: String(app.status || 'Applied').toLowerCase()
       };
     }).filter(Boolean);
 
@@ -716,6 +788,54 @@ exports.getJobseekerApplications = async (req, res) => {
   } catch (error) {
     console.error('Get Jobseeker Applications Error:', error);
     res.status(500).json({ message: 'Server error loading applied jobs list' });
+  }
+};
+
+exports.getJobseekerApplicationDetail = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { applicationId } = req.params;
+    const seeker = await ensureJobseekerExists(userId);
+
+    const application = await Application.findOne({ _id: applicationId, candidate: seeker._id })
+      .populate({
+        path: 'job',
+        populate: [
+          { path: 'jobType', select: 'jobType' },
+          { path: 'jobCategory', select: 'categoryName' }
+        ]
+      })
+      .lean();
+
+    if (!application || !application.job) {
+      return res.status(404).json({ message: 'Application not found' });
+    }
+
+    const job = application.job;
+    const appliedDate = application.appliedDate || application.createDate || new Date();
+
+    res.json({
+      id: application._id,
+      jobId: job.slug || job._id,
+      title: job.jobTitle || 'Open Position',
+      company: job.companyName || 'Hiring Company',
+      location: [job.city, job.state].filter(Boolean).join(', ') || 'N/A',
+      jobType: job.jobType?.jobType || 'Full-time',
+      status: application.status || 'Applied',
+      matchScore: application.matchScore || 0,
+      appliedDate,
+      appliedOn: new Date(appliedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+      reviewedDate: application.updateDate || application.createDate || appliedDate,
+      shortlistedDate: application.shortlistedDate || null,
+      interviewDetails: application.interviewDetails || null,
+      selectionDetails: application.selectionDetails || null,
+      rejectedDate: String(application.status || '').toLowerCase() === 'rejected'
+        ? (application.updateDate || application.createDate || appliedDate)
+        : null
+    });
+  } catch (error) {
+    console.error('Get Jobseeker Application Detail Error:', error);
+    res.status(500).json({ message: 'Server error loading application tracker' });
   }
 };
 
@@ -920,6 +1040,7 @@ exports.uploadJobseekerResume = async (req, res) => {
     if (seeker.resume) {
       try {
         const oldFilename = seeker.resume.split('/').pop();
+        await Attachment.deleteOne({ filename: oldFilename });
         const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
         const oldFilePath = isVercel
           ? path.join('/tmp', 'uploads', 'resumes', oldFilename)
@@ -932,7 +1053,24 @@ exports.uploadJobseekerResume = async (req, res) => {
       }
     }
 
-    seeker.resume = `${req.protocol}://${req.get('host')}/uploads/resumes/${req.file.filename}`;
+    const fileData = fs.readFileSync(req.file.path);
+    await Attachment.findOneAndUpdate(
+      { filename: req.file.filename },
+      {
+        filename: req.file.filename,
+        data: fileData,
+        mimeType: req.file.mimetype,
+        size: req.file.size
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    fs.unlink(req.file.path, () => {});
+
+    const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+    const protocol = forwardedProto || req.protocol || 'https';
+    const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
+
+    seeker.resume = `${publicOrigin.replace(/\/+$/, '')}/uploads/resumes/${req.file.filename}`;
     await seeker.save();
 
     res.json({
@@ -959,6 +1097,7 @@ exports.deleteJobseekerResume = async (req, res) => {
     if (seeker.resume) {
       try {
         const filename = seeker.resume.split('/').pop();
+        await Attachment.deleteOne({ filename });
         const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
         const filePath = isVercel
           ? path.join('/tmp', 'uploads', 'resumes', filename)

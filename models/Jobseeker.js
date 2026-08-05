@@ -42,6 +42,40 @@ const JobseekerSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  experiences: [{
+    position: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    company: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    employmentType: {
+      type: String,
+      default: 'Full-time',
+      trim: true
+    },
+    startDate: {
+      type: String,
+      default: ''
+    },
+    endDate: {
+      type: String,
+      default: ''
+    },
+    currentlyWorking: {
+      type: Boolean,
+      default: false
+    },
+    description: {
+      type: String,
+      default: '',
+      trim: true
+    }
+  }],
   expectedSalary: {
     type: String
   },

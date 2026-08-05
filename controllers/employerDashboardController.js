@@ -1953,6 +1953,44 @@ exports.uploadEmployerLogo = async (req, res) => {
   }
 };
 
+exports.uploadEmployerBanner = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Company banner image is required.' });
+    }
+
+    const userId = req.user._id;
+    const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+    const protocol = forwardedProto || req.protocol || 'https';
+    const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
+    const bannerUrl = `${publicOrigin.replace(/\/+$/, '')}/uploads/employer-banners/${req.file.filename}`;
+
+    const user = await User.findById(userId);
+    let employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    });
+
+    if (!employer) {
+      employer = new Employer({
+        userId,
+        login: userId,
+        companyName: user?.companyName || 'My Company',
+        phone: user?.phone || '0000000000',
+        status: 'active'
+      });
+    }
+
+    employer.bannerImage = bannerUrl;
+    await employer.save();
+
+    res.json({ message: 'Company banner uploaded successfully', bannerImage: bannerUrl });
+  } catch (error) {
+    console.error('Upload Employer Banner Error:', error);
+    res.status(500).json({ message: 'Server error uploading company banner' });
+  }
+};
+
 exports.getEmployerSubscription = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -3138,7 +3176,8 @@ exports.getEmployerSettings = async (req, res) => {
         jobTitle: req.user.designation || '',
         department: employer.department || '',
         altEmail: employer.altEmail || '',
-        bio: employer.bio || ''
+        bio: employer.bio || '',
+        companyBanner: employer.bannerImage || ''
       },
       settings: employer.settings || {
         notifications: {
@@ -3210,6 +3249,7 @@ exports.updateEmployerSettings = async (req, res) => {
       employer.department = profile.department || '';
       employer.altEmail = profile.altEmail || '';
       employer.bio = profile.bio || '';
+      if (profile.companyBanner !== undefined) employer.bannerImage = profile.companyBanner || '';
       await employer.save();
 
       return res.json({ message: 'Profile settings saved successfully.' });

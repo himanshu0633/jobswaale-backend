@@ -284,11 +284,17 @@ exports.getJobById = async (req, res) => {
 
     const respList = typeof jobDoc.responsibilities === 'string' && jobDoc.responsibilities
       ? jobDoc.responsibilities.split('\n').filter(p => p.trim() !== '')
-      : ['Translate requirements into clean, performant, and responsive layouts.'];
+      : [];
 
     const reqsList = typeof jobDoc.screeningQuestions === 'string' && jobDoc.screeningQuestions
       ? jobDoc.screeningQuestions.split('\n').filter(p => p.trim() !== '')
-      : [jobDoc.requiredExperience || `Experience Required: ${jobDoc.experience}`];
+      : [jobDoc.requiredExperience || jobDoc.experience].filter(Boolean);
+
+    const benefitsList = typeof jobDoc.benefits === 'string' && jobDoc.benefits
+      ? jobDoc.benefits.split('\n').filter(p => p.trim() !== '')
+      : [];
+
+    const successfulApplicationsCount = await Application.countDocuments({ job: jobDoc._id });
 
     const jobFormatted = {
       id: jobDoc._id,
@@ -300,40 +306,62 @@ exports.getJobById = async (req, res) => {
       salary: jobDoc.salary || (jobDoc.minSalary && jobDoc.maxSalary ? `₹${jobDoc.minSalary} - ${jobDoc.maxSalary}` : 'Not Specified'),
       type: jobDoc.jobType?.jobType || jobDoc.workMode || 'Full Time',
       postedAgo: `Posted on ${new Date(jobDoc.postingDate).toLocaleDateString('en-IN')}`,
-      level: jobDoc.workMode || 'Regular',
+      workMode: jobDoc.workMode || '',
+      level: jobDoc.workMode || '',
       experience: jobDoc.experience,
-      education: jobDoc.qualification?.name || 'Graduate',
+      education: jobDoc.qualification?.name || '',
       description: descParas,
       responsibilities: respList,
       requirements: reqsList,
-      skills: jobDoc.skills && jobDoc.skills.length > 0 ? jobDoc.skills : ['Communication', 'Team Work']
+      benefits: benefitsList,
+      skills: jobDoc.skills && jobDoc.skills.length > 0 ? jobDoc.skills : [],
+      applicants: successfulApplicationsCount,
+      applicationsCount: successfulApplicationsCount,
+      appliedCount: successfulApplicationsCount
     };
 
     const Employer = require('../models/Employer');
     const employerDoc = await Employer.findOne({
       $or: [{ userId: jobDoc.login }, { login: jobDoc.login }],
       isDeleted: { $ne: true }
-    }).select('_id').lean();
+    })
+      .populate('userId', 'email firstName lastName designation')
+      .select('_id logo bannerImage contactPerson phone website altEmail bio userId')
+      .lean();
+
+    const contactPerson = employerDoc?.contactPerson ||
+      [employerDoc?.userId?.firstName, employerDoc?.userId?.lastName].filter(Boolean).join(' ');
 
     const companyFormatted = {
       id: employerDoc?._id || null,
       name: jobDoc.companyName,
-      logo: jobDoc.companyName ? jobDoc.companyName.charAt(0) : 'J',
-      website: '',
-      about: jobDoc.aboutCompany || `${jobDoc.companyName} is a leading provider in their industry.`
+      logo: employerDoc?.logo || (jobDoc.companyName ? jobDoc.companyName.charAt(0) : 'J'),
+      website: employerDoc?.website || '',
+      bannerImage: employerDoc?.bannerImage || '',
+      about: jobDoc.aboutCompany || employerDoc?.bio || '',
+      contactPerson: contactPerson || '',
+      contactRole: employerDoc?.userId?.designation || 'Employer',
+      phone: employerDoc?.phone || '',
+      email: employerDoc?.altEmail || employerDoc?.userId?.email || ''
     };
 
     let hasApplied = false;
     let hasSaved = false;
+    let matchScore = null;
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
-        const seeker = await Jobseeker.findOne({ userId: decoded.id }).select('_id savedJobs').lean();
+        const seeker = await Jobseeker.findOne({ userId: decoded.id })
+          .select('_id savedJobs skills experience city state preferredLocation relocate qualification')
+          .lean();
         if (seeker) {
-          const existing = await Application.exists({ job: jobDoc._id, candidate: seeker._id });
+          const existing = await Application.findOne({ job: jobDoc._id, candidate: seeker._id })
+            .select('matchScore')
+            .lean();
           hasApplied = Boolean(existing);
+          matchScore = existing?.matchScore ?? calculateMatchScore(jobDoc, seeker);
           hasSaved = seeker.savedJobs && seeker.savedJobs.map(id => id.toString()).includes(jobDoc._id.toString());
         }
       } catch {
@@ -346,7 +374,8 @@ exports.getJobById = async (req, res) => {
       job: jobFormatted,
       company: companyFormatted,
       hasApplied,
-      hasSaved: Boolean(hasSaved)
+      hasSaved: Boolean(hasSaved),
+      matchScore
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

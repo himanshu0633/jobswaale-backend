@@ -15,6 +15,7 @@ const {
   duplicateEmployerJob,
   getEmployerDashboard,
   getEmployerProfile,
+  uploadEmployerBanner,
   uploadEmployerLogo,
   updateEmployerProfile,
   getEmployerSubscription,
@@ -52,6 +53,7 @@ router.use(protect, authorizeEmployerPortal);
 router.get('/dashboard', getEmployerDashboard);
 router.get('/profile', getEmployerProfile);
 router.post('/profile/logo', createImageUpload('employer-logos')('logo'), uploadEmployerLogo);
+router.post('/profile/banner', createImageUpload('employer-banners')('banner'), uploadEmployerBanner);
 router.put('/profile', updateEmployerProfile);
 router.get('/subscription-details', getEmployerSubscription);
 router.post('/subscription/select-plan', selectEmployerPlan);

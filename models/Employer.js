@@ -135,6 +135,10 @@ const EmployerSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  bannerImage: {
+    type: String,
+    default: ''
+  },
   status: {
     type: String,
     enum: ['active', 'pending', 'blacklist'],

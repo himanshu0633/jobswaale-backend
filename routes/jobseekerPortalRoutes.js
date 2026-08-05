@@ -16,6 +16,7 @@ const {
   getJobseekerSubscription,
   selectJobseekerPlan,
   getJobseekerApplications,
+  getJobseekerApplicationDetail,
   getJobseekerSavedJobs,
   toggleSaveJob,
   getJobseekerSavedEmployers,
@@ -45,6 +46,7 @@ router.delete('/profile/resume', deleteJobseekerResume);
 router.get('/subscription', getJobseekerSubscription);
 router.post('/subscription/select-plan', selectJobseekerPlan);
 router.get('/applications', getJobseekerApplications);
+router.get('/applications/:applicationId', getJobseekerApplicationDetail);
 router.get('/messages', listJobseekerMessages);
 router.get('/messages/unread', getJobseekerUnreadCount);
 router.get('/messages/:applicationId', getJobseekerMessageThread);

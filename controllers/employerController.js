@@ -101,17 +101,51 @@ exports.getPublicEmployerDetail = async (req, res) => {
       return res.status(404).json({ message: 'Employer not found' });
     }
 
-    const employer = await Employer.findOne({
-      _id: id,
+    let employer = await Employer.findOne({
       isDeleted: { $ne: true },
-      status: 'active'
+      status: 'active',
+      $or: [
+        { _id: id },
+        { userId: id },
+        { login: id }
+      ]
     })
       .populate('userId', 'email role status')
       .populate('industryType')
       .lean();
 
     if (!employer) {
-      return res.status(404).json({ message: 'Employer not found' });
+      const user = await User.findOne({
+        _id: id,
+        isDeleted: { $ne: true },
+        status: { $ne: 'inactive' },
+        $or: [{ role: 'Employer' }, { accountType: 'employer' }]
+      }).select('_id firstName lastName email phone companyName designation companyType companySize status createDate updateDate').lean();
+
+      if (!user) {
+        return res.status(404).json({ message: 'Employer not found' });
+      }
+
+      const contactPerson = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+      employer = {
+        _id: user._id,
+        userId: {
+          _id: user._id,
+          email: user.email,
+          role: 'Employer',
+          status: user.status
+        },
+        login: user._id,
+        companyName: user.companyName || user.email || 'Employer',
+        contactPerson: contactPerson || user.designation || '',
+        phone: user.phone || '',
+        companyType: user.companyType || '',
+        companySize: user.companySize || '',
+        description: [user.companyType, user.companySize].filter(Boolean).join(' • '),
+        status: 'active',
+        createDate: user.createDate || user.updateDate,
+        profileIncomplete: true
+      };
     }
 
     const loginIds = [employer.login, employer.userId?._id, employer.userId]
