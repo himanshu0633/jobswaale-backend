@@ -141,6 +141,18 @@ const buildThreadSummary = async (application, actor) => {
   const employerName = application.job?.companyName || 'Employer';
   const otherName = actor === 'employer' ? candidateName : employerName;
 
+  const otherUserId = actor === 'employer'
+    ? (application.candidate?.userId?._id || application.candidate?.userId)
+    : application.job?.login;
+
+  const io = getIO();
+  let online = false;
+  if (io && otherUserId) {
+    const roomName = getUserRoom(otherUserId);
+    const room = io.sockets.adapter.rooms.get(roomName);
+    online = room ? room.size > 0 : false;
+  }
+
   return {
     id: application._id,
     applicationId: application._id,
@@ -163,7 +175,8 @@ const buildThreadSummary = async (application, actor) => {
     time: lastMessage
       ? new Date(lastMessage.createDate).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
       : '',
-    unread: unreadCount
+    unread: unreadCount,
+    online
   };
 };
 
