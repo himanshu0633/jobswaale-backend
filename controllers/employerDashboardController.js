@@ -29,6 +29,32 @@ const formatDate = (value) => {
   return new Date(value).toISOString();
 };
 
+const getEmployerShowContactDetails = async (userId) => {
+  try {
+    const employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    }).populate('currentPlan');
+    return employer?.currentPlan?.showContactDetails === true;
+  } catch (err) {
+    console.error(err);
+    return false;
+  }
+};
+
+const getEmployerAllowResumeDownload = async (userId) => {
+  try {
+    const employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    }).populate('currentPlan');
+    return employer?.currentPlan?.allowResumeDownload === true;
+  } catch (err) {
+    console.error(err);
+    return false;
+  }
+};
+
 const daysFromNow = (value) => {
   if (!value) return null;
   const diffMs = new Date(value).getTime() - Date.now();
@@ -268,41 +294,9 @@ const ensureApplicationsExist = async (userId) => {
     // 1. Get employer's jobs
     let jobs = await Job.find({ login: userId, isDeleted: { $ne: true } });
 
-    // If no jobs exist for this recruiter, let's create one mock job to make applications functional
+    // If no jobs exist for this recruiter, return empty array immediately
     if (jobs.length === 0) {
-      let jobType = await JobType.findOne();
-      if (!jobType) {
-        jobType = await JobType.create({ jobType: 'Full Time' });
-      }
-
-      let jobCat = await JobCategory.findOne();
-      if (!jobCat) {
-        jobCat = await JobCategory.create({ categoryName: 'Software Engineering' });
-      }
-
-      let qual = await Qualification.findOne();
-      if (!qual) {
-        qual = await Qualification.create({ name: 'Bachelor of Technology' });
-      }
-
-      const mockJob = await Job.create({
-        jobTitle: 'MERN Stack Developer',
-        jobCategory: jobCat._id,
-        jobType: jobType._id,
-        vacancies: 3,
-        description: 'We are looking for a MERN Stack Developer with experience in React, Node, Express, and MongoDB.',
-        experience: '2+ Years',
-        country: 'India',
-        state: 'Karnataka',
-        district: 'Bangalore',
-        city: 'Bangalore',
-        companyName: 'TechCorp India',
-        email: 'jobs@techcorpindia.com',
-        phone: '9876543210',
-        login: userId,
-        status: 'active'
-      });
-      jobs = [mockJob];
+      return [];
     }
 
     const jobIds = jobs.map(j => j._id);
@@ -406,7 +400,7 @@ const paginate = (items, pageValue, limitValue) => {
   };
 };
 
-const mapCandidate = (candidate, index = 0) => {
+const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload = true) => {
   const salary = parseSalaryRange(candidate.expectedSalary);
   const createdAt = candidate.createDate || candidate.createdAt;
   const isRecent = createdAt && (Date.now() - new Date(createdAt).getTime()) <= 7 * 24 * 60 * 60 * 1000;
@@ -415,8 +409,8 @@ const mapCandidate = (candidate, index = 0) => {
   return {
     id: candidate._id,
     name: candidate.name,
-    email: candidate.userId?.email || '',
-    phone: candidate.phone || '',
+    email: showContacts ? (candidate.userId?.email || '') : 'Hidden (Upgrade Plan)',
+    phone: showContacts ? (candidate.phone || '') : 'Hidden (Upgrade Plan)',
     location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
     role: candidate.jobCategory?.categoryName || 'Candidate',
     experience: candidate.experience || 'Fresher',
@@ -437,8 +431,9 @@ const mapCandidate = (candidate, index = 0) => {
     avatarTone: ['from-rose-200 to-amber-200', 'from-blue-200 to-red-200', 'from-pink-200 to-slate-300', 'from-yellow-200 to-orange-200', 'from-sky-200 to-slate-200', 'from-amber-200 to-emerald-200', 'from-purple-200 to-pink-200'][index % 7],
     isPremium: Boolean(candidate.currentPlan),
     isRecent,
-    activeToday: Boolean(updatedToday),
-    resume: candidate.resume || ''
+    resume: allowDownload ? (candidate.resume || '') : '',
+    hasResume: Boolean(candidate.resume),
+    allowResumeDownload: allowDownload
   };
 };
 
@@ -546,7 +541,9 @@ exports.getEmployerCandidates = async (req, res) => {
       .populate('currentPlan', 'planName')
       .lean();
 
-    let mapped = candidates.map(mapCandidate);
+    const showContacts = await getEmployerShowContactDetails(req.user._id);
+    const allowDownload = await getEmployerAllowResumeDownload(req.user._id);
+    let mapped = candidates.map((c, idx) => mapCandidate(c, idx, showContacts, allowDownload));
     const rawSearch = String(query.search || '').trim().toLowerCase();
     const employmentTypes = splitList(query.employmentTypes);
     const minSalary = nullableNumber(query.minSalary);
@@ -657,7 +654,9 @@ exports.getEmployerCandidateProfile = async (req, res) => {
       return res.status(403).json({ message: 'You are not allowed to view this candidate profile.' });
     }
 
-    const mapped = mapCandidate(candidate);
+    const showContacts = await getEmployerShowContactDetails(userId);
+    const allowDownload = await getEmployerAllowResumeDownload(userId);
+    const mapped = mapCandidate(candidate, 0, showContacts, allowDownload);
     const skills = Array.isArray(candidate.skills) && candidate.skills.length
       ? candidate.skills
       : [candidate.jobCategory?.categoryName, candidate.jobType?.jobType, candidate.industryType?.industryType].filter(Boolean);
@@ -665,7 +664,7 @@ exports.getEmployerCandidateProfile = async (req, res) => {
 
     res.json({
       ...mapped,
-      phone: candidate.phone || candidate.userId?.phone || '',
+      phone: showContacts ? (candidate.phone || candidate.userId?.phone || '') : 'Hidden (Upgrade Plan)',
       designation: candidate.designation || mapped.role,
       bio: candidate.bio || `Experienced ${mapped.role} profile with ${mapped.experience} experience.`,
       expectedSalary: candidate.expectedSalary || 'Not specified',
@@ -743,6 +742,7 @@ exports.getEmployerApplications = async (req, res) => {
       })
       .lean();
 
+    const showContacts = await getEmployerShowContactDetails(userId);
     let applications = dbApps.map((app, index) => {
       const candidate = app.candidate;
       const job = app.job;
@@ -754,8 +754,8 @@ exports.getEmployerApplications = async (req, res) => {
         candidateId: candidate._id,
         jobId: job._id,
         name: candidate.name,
-        email: candidate.userId?.email || '',
-        phone: candidate.phone || '',
+        email: showContacts ? (candidate.userId?.email || '') : 'Hidden (Upgrade Plan)',
+        phone: showContacts ? (candidate.phone || '') : 'Hidden (Upgrade Plan)',
         location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
         jobTitle: job.jobTitle || 'Open Position',
         jobType: job.jobType?.jobType || 'Full Time',
@@ -856,6 +856,7 @@ exports.getEmployerApplicantHistory = async (req, res) => {
       .sort({ appliedDate: -1, createDate: -1 })
       .lean();
 
+    const showContacts = await getEmployerShowContactDetails(userId);
     let applicants = dbApps.map((app) => {
       const candidate = app.candidate;
       const job = app.job;
@@ -867,8 +868,8 @@ exports.getEmployerApplicantHistory = async (req, res) => {
         applicationId: app._id,
         candidateId: candidate._id,
         name: candidate.name || [candidate.userId?.firstName, candidate.userId?.lastName].filter(Boolean).join(' ') || 'Jobseeker',
-        email: candidate.userId?.email || '',
-        phone: candidate.phone || candidate.userId?.phone || '',
+        email: showContacts ? (candidate.userId?.email || '') : 'Hidden (Upgrade Plan)',
+        phone: showContacts ? (candidate.phone || candidate.userId?.phone || '') : 'Hidden (Upgrade Plan)',
         qualification: candidate.qualification?.name || '',
         experience: candidate.experience || '',
         location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || '',
@@ -956,6 +957,8 @@ exports.getEmployerApplicationDetails = async (req, res) => {
       return res.status(403).json({ message: 'You are not allowed to view this application.' });
     }
 
+    const showContacts = await getEmployerShowContactDetails(req.user._id);
+    const allowDownload = await getEmployerAllowResumeDownload(req.user._id);
     const candidate = application.candidate;
     const job = application.job;
     const appliedDate = application.appliedDate || application.createDate || new Date();
@@ -976,8 +979,8 @@ exports.getEmployerApplicationDetails = async (req, res) => {
       candidate: {
         id: candidate._id,
         name: candidate.name,
-        email: candidate.userId?.email || '',
-        phone: candidate.phone || candidate.userId?.phone || '',
+        email: showContacts ? (candidate.userId?.email || '') : 'Hidden (Upgrade Plan)',
+        phone: showContacts ? (candidate.phone || candidate.userId?.phone || '') : 'Hidden (Upgrade Plan)',
         initials: getInitials(candidate.name).toUpperCase(),
         designation: candidate.designation || candidate.jobCategory?.categoryName || job.jobTitle || 'Candidate',
         location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
@@ -988,7 +991,9 @@ exports.getEmployerApplicationDetails = async (req, res) => {
         currentSalary: salaryRange.min ? `₹ ${salaryRange.min} LPA` : 'Not specified',
         noticePeriod: candidate.noticePeriod || 'Immediate',
         relocate: candidate.relocate === 'no' ? 'No' : 'Yes',
-        resume: candidate.resume || '',
+        resume: allowDownload ? (candidate.resume || '') : '',
+        hasResume: Boolean(candidate.resume),
+        allowResumeDownload: allowDownload,
         bio: candidate.bio || '',
         skills,
         education: [{
@@ -1065,6 +1070,7 @@ exports.getEmployerInterviews = async (req, res) => {
       return type || 'Other';
     };
 
+    const showContacts = await getEmployerShowContactDetails(userId);
     const interviews = dbApps.map((app, index) => {
       const candidate = app.candidate;
       const job = app.job;
@@ -1080,8 +1086,8 @@ exports.getEmployerInterviews = async (req, res) => {
         candidateId: candidate._id,
         jobId: job._id,
         name: candidate.name,
-        email: candidate.userId?.email || '',
-        phone: candidate.phone || '',
+        email: showContacts ? (candidate.userId?.email || '') : 'Hidden (Upgrade Plan)',
+        phone: showContacts ? (candidate.phone || '') : 'Hidden (Upgrade Plan)',
         location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
         jobTitle: job.jobTitle || 'Open Position',
         jobType: job.jobType?.jobType || 'Full Time',
@@ -1193,6 +1199,7 @@ exports.getEmployerSelected = async (req, res) => {
       return null;
     };
 
+    const showContacts = await getEmployerShowContactDetails(userId);
     const selectedRows = dbApps.map((app, index) => {
       const candidate = app.candidate;
       const job = app.job;
@@ -1209,8 +1216,8 @@ exports.getEmployerSelected = async (req, res) => {
         candidateId: candidate._id,
         jobId: job._id,
         name: candidate.name,
-        email: candidate.userId?.email || '',
-        phone: candidate.phone || '',
+        email: showContacts ? (candidate.userId?.email || '') : 'Hidden (Upgrade Plan)',
+        phone: showContacts ? (candidate.phone || '') : 'Hidden (Upgrade Plan)',
         location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
         jobTitle: job.jobTitle || 'Open Position',
         jobType: details.employmentType || job.jobType?.jobType || 'Full Time',
@@ -2951,9 +2958,11 @@ exports.getEmployerTalentPool = async (req, res) => {
       return ['HTML', 'CSS', 'JS'];
     };
 
+    const showContacts = await getEmployerShowContactDetails(userId);
+    const allowDownload = await getEmployerAllowResumeDownload(userId);
     let mapped = poolItems.map((item, idx) => {
       if (!item.candidateId) return null;
-      const cMapped = mapCandidate(item.candidateId, idx);
+      const cMapped = mapCandidate(item.candidateId, idx, showContacts, allowDownload);
       return {
         ...cMapped,
         talentPoolId: item._id,
@@ -3120,7 +3129,9 @@ exports.searchEmployerTalentPoolCandidates = async (req, res) => {
       .populate('currentPlan', 'planName')
       .lean();
 
-    let mapped = candidates.map(mapCandidate);
+    const showContacts = await getEmployerShowContactDetails(req.user._id);
+    const allowDownload = await getEmployerAllowResumeDownload(req.user._id);
+    let mapped = candidates.map((item, idx) => mapCandidate(item, idx, showContacts, allowDownload));
 
     if (search) {
       mapped = mapped.filter(item => {

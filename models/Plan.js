@@ -63,6 +63,14 @@ const PlanSchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  showContactDetails: {
+    type: Boolean,
+    default: false
+  },
+  allowResumeDownload: {
+    type: Boolean,
+    default: false
+  },
   employerFeatures: [{
     type: String,
     trim: true

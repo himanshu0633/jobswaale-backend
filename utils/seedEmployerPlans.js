@@ -14,6 +14,8 @@ const employerPlanSeeds = [
     autoMailLimit: 0,
     showBadge: true,
     badge: 'FREE',
+    showContactDetails: false,
+    allowResumeDownload: false,
     employerFeatures: ['Employer Dashboard', 'First Job Post Free'],
     offerEnabled: true,
     offerTitle: 'FREE STARTER',
@@ -33,6 +35,8 @@ const employerPlanSeeds = [
     autoMailLimit: 25,
     showBadge: true,
     badge: 'BEST VALUE',
+    showContactDetails: true,
+    allowResumeDownload: true,
     employerFeatures: ['Direct Contact Access', 'Employer Dashboard'],
     offerEnabled: true,
     offerTitle: 'FIRST TIME OFFER',
@@ -52,6 +56,8 @@ const employerPlanSeeds = [
     autoMailLimit: 100,
     showBadge: true,
     badge: 'MOST POPULAR',
+    showContactDetails: true,
+    allowResumeDownload: true,
     employerFeatures: ['Direct Contact Access', 'Employer Dashboard', 'Priority Support'],
     displayOrder: 2,
     status: 'active'
@@ -68,6 +74,8 @@ const employerPlanSeeds = [
     autoMailLimit: 300,
     showBadge: true,
     badge: 'ENTERPRISE CHOICE',
+    showContactDetails: true,
+    allowResumeDownload: true,
     employerFeatures: ['Direct Contact Access', 'Employer Dashboard', 'Priority Support', 'Candidate Tracking'],
     displayOrder: 3,
     status: 'active'
@@ -84,6 +92,8 @@ const employerPlanSeeds = [
     autoMailLimit: 1000,
     showBadge: true,
     badge: 'PREMIUM',
+    showContactDetails: true,
+    allowResumeDownload: true,
     employerFeatures: ['Direct Contact Access', 'Employer Dashboard', 'Priority Support', 'Candidate Tracking'],
     displayOrder: 4,
     status: 'active'
@@ -100,6 +110,8 @@ const employerPlanSeeds = [
     autoMailLimit: 10,
     showBadge: true,
     badge: 'BASIC',
+    showContactDetails: false,
+    allowResumeDownload: false,
     employerFeatures: ['Direct Contact Access'],
     displayOrder: 5,
     status: 'inactive'
