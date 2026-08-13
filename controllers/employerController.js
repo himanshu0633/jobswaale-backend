@@ -211,6 +211,9 @@ exports.getPublicEmployerDetail = async (req, res) => {
         company: job.companyName,
         location: [job.city, job.state].filter(Boolean).join(', ') || (job.jobLocations || []).join(', ') || 'Location not specified',
         salary: job.salary || (job.minSalary && job.maxSalary ? `₹${job.minSalary} - ${job.maxSalary}` : 'Not Specified'),
+        minSalary: job.minSalary,
+        maxSalary: job.maxSalary,
+        salaryUnit: job.salaryUnit || '',
         type: job.jobType?.jobType || job.workMode || 'Full Time',
         category: job.jobCategory?.categoryName || '',
         logoLetter: job.companyName ? job.companyName.charAt(0).toUpperCase() : 'J'

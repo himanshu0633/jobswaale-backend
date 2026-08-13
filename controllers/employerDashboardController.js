@@ -61,6 +61,16 @@ const daysFromNow = (value) => {
   return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 };
 
+const daysFromToday = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  return Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+};
+
 const addDays = (date, days) => {
   const nextDate = new Date(date);
   nextDate.setDate(nextDate.getDate() + days);
@@ -441,8 +451,8 @@ const getJobDisplayStatus = (job) => {
   if (job.publishStatus === 'draft' || job.status === 'pending') return 'Draft';
   if (job.status === 'inactive') return 'Paused';
   if (job.status === 'closed') return 'Closed';
-  const remainingDays = daysFromNow(job.jobExpiry || job.planValidity);
-  if (remainingDays !== null && remainingDays >= 0 && remainingDays <= 7) return 'Expiring';
+  const remainingDays = daysFromToday(job.jobExpiry);
+  if (remainingDays !== null && remainingDays < 0) return 'Expired';
   return 'Active';
 };
 
@@ -485,28 +495,70 @@ const buildJobPreview = async (req, employer, payload) => {
 exports.getEmployerJobs = async (req, res) => {
   try {
     const userId = req.user._id;
-    const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
+    const employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    }).lean();
+    const loginIds = [userId, employer?.userId, employer?.login].filter(Boolean);
+    const companyName = employer?.companyName || req.user.companyName;
+    const ownershipFilter = {
+      $or: [
+        { login: { $in: loginIds } },
+        ...(companyName ? [{ companyName }] : [])
+      ]
+    };
+
+    const jobs = await Job.find({ ...ownershipFilter, isDeleted: { $ne: true } })
       .sort({ createDate: -1 })
       .populate('jobType', 'jobType')
       .populate('jobCategory', 'categoryName')
       .lean();
+    const jobIds = jobs.map(job => job._id);
+    const applicationCounts = await Application.aggregate([
+      { $match: { job: { $in: jobIds } } },
+      {
+        $group: {
+          _id: '$job',
+          total: { $sum: 1 },
+          shortlisted: {
+            $sum: { $cond: [{ $eq: ['$status', 'Shortlisted'] }, 1, 0] }
+          },
+          interviews: {
+            $sum: { $cond: [{ $eq: ['$status', 'Interview'] }, 1, 0] }
+          }
+        }
+      }
+    ]);
+    const applicationCountMap = applicationCounts.reduce((acc, item) => {
+      acc[String(item._id)] = item;
+      return acc;
+    }, {});
 
     const mappedJobs = jobs.map((job) => {
       const displayStatus = getJobDisplayStatus(job);
+      const counts = applicationCountMap[String(job._id)] || {};
+      const applications = Number(counts.total || 0);
+      const shortlisted = Number(counts.shortlisted || 0);
+      const interviews = Number(counts.interviews || 0);
+      const views = Number(job.views || job.viewCount || job.profileViews || 0);
       return {
         id: job._id,
         title: job.jobTitle,
         postDate: formatDate(job.createDate || job.postingDate),
         location: getJobLocationText(job),
         jobType: job.jobType?.jobType || 'N/A',
-        expiry: formatDate(job.jobExpiry || job.planValidity),
+        expiry: formatDate(job.jobExpiry),
         status: displayStatus,
         rawStatus: job.status,
         publishStatus: job.publishStatus,
         vacancies: job.vacancies || 0,
         workMode: job.workMode || '',
         category: job.jobCategory?.categoryName || '',
-        applications: Math.max(Number(job.vacancies || 0) * 3, 0)
+        applications,
+        applicants: applications,
+        views,
+        shortlisted,
+        interviews
       };
     });
 
@@ -514,7 +566,8 @@ exports.getEmployerJobs = async (req, res) => {
       stats: {
         active: mappedJobs.filter(job => job.status === 'Active').length,
         draft: mappedJobs.filter(job => job.status === 'Draft').length,
-        expiring: mappedJobs.filter(job => job.status === 'Expiring').length,
+        expiring: 0,
+        expired: mappedJobs.filter(job => job.status === 'Expired').length,
         closed: mappedJobs.filter(job => job.status === 'Closed' || job.status === 'Paused').length
       },
       filters: {
@@ -764,6 +817,9 @@ exports.getEmployerApplications = async (req, res) => {
         displayDate: formatDisplayDate(appliedDate),
         matchScore: app.matchScore || 0,
         status: app.status,
+        previousStatus: app.previousStatus || '',
+        rejectedFromStatus: app.rejectedFromStatus || (app.status === 'Rejected' ? app.previousStatus || 'Not available' : ''),
+        rejectedDate: app.rejectedDate ? formatDisplayDate(app.rejectedDate) : '',
         initials: getInitials(candidate.name).toUpperCase(),
         avatarTone: ['from-rose-200 to-amber-200', 'from-blue-200 to-red-200', 'from-pink-200 to-slate-300', 'from-yellow-200 to-orange-200', 'from-amber-200 to-emerald-200', 'from-sky-200 to-slate-200', 'from-purple-200 to-pink-200'][index % 7],
         interviewDetails: app.interviewDetails || null
@@ -974,6 +1030,10 @@ exports.getEmployerApplicationDetails = async (req, res) => {
       appliedDate,
       appliedDisplayDate: formatDisplayDate(appliedDate),
       shortlistedDate: application.shortlistedDate || null,
+      previousStatus: application.previousStatus || '',
+      rejectedFromStatus: application.rejectedFromStatus || (application.status === 'Rejected' ? application.previousStatus || 'Not available' : ''),
+      rejectedDate: application.rejectedDate || null,
+      rejectedDisplayDate: application.rejectedDate ? formatDisplayDate(application.rejectedDate) : '',
       interviewDetails: application.interviewDetails || null,
       selectionDetails: application.selectionDetails || null,
       candidate: {
@@ -1484,8 +1544,8 @@ exports.getEmployerJobDetails = async (req, res) => {
       rawStatus: job.status,
       publishStatus: job.publishStatus,
       postDate: formatDate(job.createDate || job.postingDate),
-      expiry: formatDate(job.jobExpiry || job.planValidity),
-      remainingDays: daysFromNow(job.jobExpiry || job.planValidity),
+      expiry: formatDate(job.jobExpiry),
+      remainingDays: daysFromToday(job.jobExpiry),
       views,
       impressions,
       location: getJobLocationText(job),
@@ -1577,14 +1637,19 @@ exports.getEmployerDashboard = async (req, res) => {
       .populate('currentPlan')
       .lean();
 
-    const allJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).lean();
+    const loginIds = [userId, employer?.userId, employer?.login].filter(Boolean);
+    const companyName = employer?.companyName || req.user.companyName;
+    const ownershipFilter = {
+      $or: [
+        { login: { $in: loginIds } },
+        ...(companyName ? [{ companyName }] : [])
+      ]
+    };
+    const allJobs = await Job.find({ ...ownershipFilter, isDeleted: { $ne: true } }).lean();
     const defaultPlan = !employer?.currentPlan && req.user.selectedPlan
       ? await Plan.findById(req.user.selectedPlan).lean()
       : null;
-    const expiringJobs = allJobs.filter(job => {
-      const remainingDays = daysFromNow(job.jobExpiry || job.planValidity);
-      return remainingDays !== null && remainingDays >= 0 && remainingDays <= 7;
-    });
+    const expiredJobs = allJobs.filter(job => getJobDisplayStatus(job) === 'Expired');
 
     const plan = employer?.currentPlan || defaultPlan || jobs.find(job => job.currentPlan)?.currentPlan || null;
     const planLimit = Number(plan?.freeJobPosts || 0);
@@ -1653,6 +1718,31 @@ exports.getEmployerDashboard = async (req, res) => {
       .limit(4)
       .lean();
 
+    const jobStats = {
+      total: allJobs.length,
+      active: allJobs.filter(job => getJobDisplayStatus(job) === 'Active').length,
+      draft: allJobs.filter(job => getJobDisplayStatus(job) === 'Draft').length,
+      expired: expiredJobs.length,
+      closed: allJobs.filter(job => ['Closed', 'Paused'].includes(getJobDisplayStatus(job))).length
+    };
+    const activeJobRows = allJobs
+      .filter(job => getJobDisplayStatus(job) === 'Active')
+      .map(job => {
+        const jCounts = countMap[String(job._id)] || { total: 0, shortlisted: 0, interview: 0, selected: 0 };
+        return {
+          id: job._id,
+          title: job.jobTitle,
+          location: (job.jobLocations && job.jobLocations.length ? job.jobLocations : [job.city, job.state]).filter(Boolean).join(', '),
+          workMode: job.workMode,
+          status: getJobDisplayStatus(job),
+          applications: jCounts.total,
+          shortlisted: jCounts.shortlisted,
+          interviews: jCounts.interview,
+          selected: jCounts.selected,
+          postedAt: formatDate(job.createDate || job.postingDate)
+        };
+      });
+
     res.json({
       company: {
         name: employer?.companyName || req.user.companyName || req.user.firstName || 'Employer',
@@ -1675,7 +1765,16 @@ exports.getEmployerDashboard = async (req, res) => {
         newApplications: appliedCount,
         interviews: interviewCount,
         candidates: shortlistedCount,
-        jobsExpiring: expiringJobs.length
+        jobsExpiring: expiredJobs.length
+      },
+      stats: {
+        jobs: jobStats,
+        applications: applicationCount,
+        reviewed: reviewCount,
+        shortlisted: shortlistedCount,
+        interviews: interviewCount,
+        selected: selectedCount,
+        rejected: rejectedCount
       },
       pipeline: {
         applied: appliedCount,
@@ -1685,21 +1784,13 @@ exports.getEmployerDashboard = async (req, res) => {
         selected: selectedCount,
         notSelected: rejectedCount
       },
-      activeJobs: jobs.map(job => {
-        const jCounts = countMap[String(job._id)] || { total: 0, shortlisted: 0, interview: 0, selected: 0 };
-        return {
-          id: job._id,
-          title: job.jobTitle,
-          location: (job.jobLocations && job.jobLocations.length ? job.jobLocations : [job.city, job.state]).filter(Boolean).join(', '),
-          workMode: job.workMode,
-          status: job.status,
-          applications: jCounts.total,
-          shortlisted: jCounts.shortlisted,
-          interviews: jCounts.interview,
-          selected: jCounts.selected,
-          postedAt: formatDate(job.createDate || job.postingDate)
-        };
-      }),
+      activeJobs: activeJobRows,
+      jobPerformance: activeJobRows.slice(0, 7).map((job, index) => ({
+        label: `J${index + 1}`,
+        title: job.title,
+        value: job.applications,
+        active: index === 0
+      })),
       latestApplications: latestApps.map(app => ({
         id: app._id,
         candidateName: app.candidate?.name || 'N/A',
@@ -1718,8 +1809,7 @@ exports.getEmployerDashboard = async (req, res) => {
         { type: 'application', title: 'New Application Received', description: `${latestApps[0]?.candidate?.name || 'Candidate'} applied for ${latestApps[0]?.job?.jobTitle || 'a job'}`, time: '2 minutes ago' },
         { type: 'shortlisted', title: 'Candidate Shortlisted', description: `${latestApps[1]?.candidate?.name || 'Candidate'} shortlisted for ${latestApps[1]?.job?.jobTitle || 'a role'}`, time: '1 hour ago' },
         { type: 'interview', title: 'Interview Scheduled', description: `Interview scheduled for ${interviewApps[0]?.candidate?.name || 'candidate'}`, time: '3 hours ago' },
-        { type: 'job', title: 'Job Published', description: `${jobs[0]?.jobTitle || 'Job'} has been published`, time: '5 hours ago' },
-        { type: 'expiry', title: 'Job Expiring Soon', description: `${expiringJobs[0]?.jobTitle || 'A job'} is expiring soon`, time: '1 day ago' }
+        { type: 'job', title: 'Job Published', description: `${jobs[0]?.jobTitle || 'Job'} has been published`, time: '5 hours ago' }
       ]
     });
   } catch (error) {
@@ -1735,10 +1825,18 @@ exports.getEmployerProfile = async (req, res) => {
       isDeleted: { $ne: true }
     }).populate('currentPlan').populate('industryType').lean();
 
-    const allJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).lean();
+    const loginIds = [userId, employer?.userId, employer?.login].filter(Boolean);
+    const companyName = employer?.companyName || req.user.companyName;
+    const ownershipFilter = {
+      $or: [
+        { login: { $in: loginIds } },
+        ...(companyName ? [{ companyName }] : [])
+      ]
+    };
+    const allJobs = await Job.find({ ...ownershipFilter, isDeleted: { $ne: true } }).lean();
     const jobIds = allJobs.map(j => j._id);
 
-    const activeJobsCount = allJobs.filter(j => String(j.status || '').toLowerCase() === 'active').length;
+    const activeJobsCount = allJobs.filter(job => getJobDisplayStatus(job) === 'Active').length;
     const hiredCount = await Application.countDocuments({ job: { $in: jobIds }, status: 'Offered' });
 
     const plan = employer?.currentPlan || null;
@@ -2008,10 +2106,18 @@ exports.getEmployerSubscription = async (req, res) => {
       isDeleted: { $ne: true }
     }).populate('currentPlan').lean();
 
-    const allJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).lean();
+    const loginIds = [userId, employer?.userId, employer?.login].filter(Boolean);
+    const companyName = employer?.companyName || req.user.companyName;
+    const ownershipFilter = {
+      $or: [
+        { login: { $in: loginIds } },
+        ...(companyName ? [{ companyName }] : [])
+      ]
+    };
+    const allJobs = await Job.find({ ...ownershipFilter, isDeleted: { $ne: true } }).lean();
     const jobIds = allJobs.map(j => j._id);
 
-    const activeJobsCount = allJobs.filter(j => String(j.status || '').toLowerCase() === 'active').length;
+    const activeJobsCount = allJobs.filter(job => getJobDisplayStatus(job) === 'Active').length;
     const applicationsCount = await Application.countDocuments({ job: { $in: jobIds } });
     const teamMembersCount = employer?.teamMembers?.length || 1;
 
@@ -2656,6 +2762,14 @@ exports.updateApplicationStatus = async (req, res) => {
       return res.status(403).json({ message: 'You are not allowed to update this application.' });
     }
 
+    const previousStatus = application.status;
+    application.previousStatus = previousStatus;
+    if (status === 'Rejected') {
+      application.rejectedFromStatus = previousStatus && previousStatus !== 'Rejected'
+        ? previousStatus
+        : application.rejectedFromStatus || 'Not available';
+      application.rejectedDate = new Date();
+    }
     application.status = status;
     if (status === 'Shortlisted') {
       application.shortlistedDate = new Date();

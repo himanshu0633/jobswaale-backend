@@ -27,6 +27,32 @@ const GOOGLE_PROFILE_DUMMY_VALUES = {
   experience: 'Fresher'
 };
 
+const isMonthlySalaryUnit = (unit = '') => /month|monthly|p\.?m|\/mo/i.test(String(unit));
+
+const formatJobSalary = (job = {}) => {
+  if (job.salary) return job.salary;
+  const min = Number(job.minSalary);
+  const max = Number(job.maxSalary);
+  const hasMin = Number.isFinite(min) && min > 0;
+  const hasMax = Number.isFinite(max) && max > 0;
+  if (!hasMin && !hasMax) return 'Salary not specified';
+
+  const unit = job.salaryUnit || 'P.A.';
+  const formatAmount = (amount) => {
+    if (isMonthlySalaryUnit(unit)) {
+      if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
+      return `₹${Math.round(amount / 1000)}k`;
+    }
+    if (amount >= 100000) return `₹${(amount / 100000).toFixed(0)} LPA`;
+    return `₹${amount}`;
+  };
+
+  const range = hasMin && hasMax
+    ? `${formatAmount(min)} - ${formatAmount(max)}`
+    : formatAmount(hasMin ? min : max);
+  return `${range} ${unit}`.trim();
+};
+
 const clearGoogleDummyProfileValues = (seeker) => {
   const user = seeker?.userId;
   const isGoogleUser = Boolean(user?.providers?.googleId);
@@ -401,7 +427,10 @@ exports.getJobseekerDashboard = async (req, res) => {
       title: job.jobTitle,
       company: job.companyName || 'Hiring Company',
       location: [job.city, job.state].filter(Boolean).join(', ') || job.preferredLocation || 'India',
-      salary: job.salary || (job.minSalary ? `₹${(job.minSalary / 100000).toFixed(0)} - ${(job.maxSalary / 100000).toFixed(0)} LPA` : 'Salary not specified'),
+      salary: formatJobSalary(job),
+      minSalary: job.minSalary,
+      maxSalary: job.maxSalary,
+      salaryUnit: job.salaryUnit || '',
       type: job.jobType?.jobType || 'Full Time',
       logo: job.companyName?.charAt(0).toUpperCase() || 'C'
     }));
@@ -584,6 +613,13 @@ exports.updateJobseekerProfile = async (req, res) => {
     });
   } catch (error) {
     console.error('Update Jobseeker Profile Error:', error);
+    if (
+      error?.name === 'ValidationError' ||
+      error?.name === 'CastError' ||
+      /mobile number|experience/i.test(error?.message || '')
+    ) {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error updating profile details' });
   }
 };
@@ -881,7 +917,10 @@ exports.getJobseekerSavedJobs = async (req, res) => {
         tone: colors[index % colors.length],
         location: [job.city, job.state].filter(Boolean).join(', ') || 'N/A',
         type: job.jobType?.jobType || 'Full Time',
-        salary: job.salary || (job.minSalary ? `₹${(job.minSalary / 100000).toFixed(0)} - ${(job.maxSalary / 100000).toFixed(0)} LPA` : 'Salary not specified')
+        salary: formatJobSalary(job),
+        minSalary: job.minSalary,
+        maxSalary: job.maxSalary,
+        salaryUnit: job.salaryUnit || ''
       };
     });
 

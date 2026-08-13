@@ -16,6 +16,17 @@ const ApplicationSchema = new mongoose.Schema({
     enum: ['Applied', 'Shortlisted', 'Interview', 'Reviewed', 'Rejected', 'Offered'],
     default: 'Applied'
   },
+  previousStatus: {
+    type: String,
+    default: ''
+  },
+  rejectedFromStatus: {
+    type: String,
+    default: ''
+  },
+  rejectedDate: {
+    type: Date
+  },
   matchScore: {
     type: Number,
     default: 0
