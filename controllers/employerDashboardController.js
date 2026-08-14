@@ -48,7 +48,12 @@ const getEmployerAllowResumeDownload = async (userId) => {
       $or: [{ userId }, { login: userId }],
       isDeleted: { $ne: true }
     }).populate('currentPlan');
-    return employer?.currentPlan?.allowResumeDownload === true;
+    const plan = employer?.currentPlan;
+    const planEndDate = employer?.planValidity || plan?.endDate || null;
+    const isPaidPlan = plan?.planType === 'Paid' || Number(plan?.cost || 0) > 0;
+    const isPlanActive = !planEndDate || new Date(planEndDate).getTime() >= Date.now();
+
+    return Boolean(isPaidPlan && isPlanActive && plan?.allowResumeDownload === true);
   } catch (err) {
     console.error(err);
     return false;
