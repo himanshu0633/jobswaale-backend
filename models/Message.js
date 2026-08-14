@@ -62,6 +62,7 @@ const MessageSchema = new mongoose.Schema({
 });
 
 MessageSchema.index({ application: 1, createDate: 1 });
+MessageSchema.index({ application: 1, senderRole: 1, readAt: 1 });
 MessageSchema.index({ employer: 1, createDate: -1 });
 MessageSchema.index({ candidate: 1, createDate: -1 });
 MessageSchema.index({ job: 1, createDate: -1 });

@@ -92,9 +92,12 @@ const populateApplicationQuery = () => ([
   }
 ]);
 
-const getAccessibleApplications = async (req, actor) => {
+const getAccessibleApplications = async (req, actor, options = {}) => {
+  const messageableOnly = options.messageableOnly === true;
+
   if (actor === 'employer') {
-    const applications = await Application.find({})
+    const query = messageableOnly ? {} : {};
+    const applications = await Application.find(query)
       .populate(populateApplicationQuery())
       .sort({ updateDate: -1, createDate: -1 })
       .lean();
@@ -105,7 +108,12 @@ const getAccessibleApplications = async (req, actor) => {
   const seeker = await Jobseeker.findOne({ userId: req.user._id }).select('_id').lean();
   if (!seeker) return [];
 
-  return Application.find({ candidate: seeker._id })
+  const query = { candidate: seeker._id };
+  if (messageableOnly) {
+    query.status = { $in: JOBSEEKER_MESSAGE_STATUSES };
+  }
+
+  return Application.find(query)
     .populate(populateApplicationQuery())
     .sort({ updateDate: -1, createDate: -1 })
     .lean();
@@ -127,16 +135,7 @@ const getAccessibleApplicationById = async (req, actor, applicationId) => {
   return String(application.candidate._id) === String(seeker._id) ? application : null;
 };
 
-const buildThreadSummary = async (application, actor) => {
-  const [lastMessage, unreadCount] = await Promise.all([
-    Message.findOne({ application: application._id }).sort({ createDate: -1 }).lean(),
-    Message.countDocuments({
-      application: application._id,
-      senderRole: actor === 'employer' ? 'jobseeker' : 'employer',
-      readAt: null
-    })
-  ]);
-
+const buildThreadSummaryFromMeta = (application, actor, lastMessage = null, unreadCount = 0) => {
   const candidateName = application.candidate?.name || 'Candidate';
   const employerName = application.job?.companyName || 'Employer';
   const otherName = actor === 'employer' ? candidateName : employerName;
@@ -180,15 +179,68 @@ const buildThreadSummary = async (application, actor) => {
   };
 };
 
+const buildThreadSummary = async (application, actor) => {
+  const [lastMessage, unreadCount] = await Promise.all([
+    Message.findOne({ application: application._id }).sort({ createDate: -1 }).lean(),
+    Message.countDocuments({
+      application: application._id,
+      senderRole: actor === 'employer' ? 'jobseeker' : 'employer',
+      readAt: null
+    })
+  ]);
+
+  return buildThreadSummaryFromMeta(application, actor, lastMessage, unreadCount);
+};
+
+const buildThreadSummaries = async (applications, actor) => {
+  const applicationIds = applications.map(app => app._id).filter(Boolean);
+  if (!applicationIds.length) return [];
+
+  const unreadSenderRole = actor === 'employer' ? 'jobseeker' : 'employer';
+  const [lastMessageRows, unreadRows] = await Promise.all([
+    Message.aggregate([
+      { $match: { application: { $in: applicationIds } } },
+      { $sort: { application: 1, createDate: -1 } },
+      { $group: { _id: '$application', message: { $first: '$$ROOT' } } }
+    ]),
+    Message.aggregate([
+      {
+        $match: {
+          application: { $in: applicationIds },
+          senderRole: unreadSenderRole,
+          readAt: null
+        }
+      },
+      { $group: { _id: '$application', count: { $sum: 1 } } }
+    ])
+  ]);
+
+  const lastMessageByApplication = new Map(
+    lastMessageRows.map(row => [String(row._id), row.message])
+  );
+  const unreadByApplication = new Map(
+    unreadRows.map(row => [String(row._id), row.count])
+  );
+
+  return applications.map(app => buildThreadSummaryFromMeta(
+    app,
+    actor,
+    lastMessageByApplication.get(String(app._id)) || null,
+    unreadByApplication.get(String(app._id)) || 0
+  ));
+};
+
 const listMessages = (actor) => async (req, res) => {
   try {
-    const applications = await getAccessibleApplications(req, actor);
+    const messageableOnly = ['1', 'true', 'yes'].includes(String(req.query.messageableOnly || '').toLowerCase());
+    const applications = await getAccessibleApplications(req, actor, { messageableOnly });
     const jobId = String(req.query.jobId || '').trim();
     const filtered = jobId
       ? applications.filter(app => String(app.job?._id) === jobId)
       : applications;
 
-    const threads = await Promise.all(filtered.map(app => buildThreadSummary(app, actor)));
+    const visible = messageableOnly ? filtered.filter(app => canMessageApplication(app, actor)) : filtered;
+    const threads = await buildThreadSummaries(visible, actor);
     threads.sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0));
     res.json({ threads });
   } catch (error) {

@@ -1803,7 +1803,8 @@ exports.getEmployerDashboard = async (req, res) => {
         id: app._id,
         candidateName: app.candidate?.name || 'N/A',
         position: app.job?.jobTitle || 'Open Position',
-        scheduledAt: app.interviewDetails?.date ? formatDate(app.interviewDetails.date) : formatDate(new Date())
+        scheduledAt: app.interviewDetails?.date ? formatDate(app.interviewDetails.date) : formatDate(new Date()),
+        scheduledTime: app.interviewDetails?.time || ''
       })),
       recentActivity: [
         { type: 'application', title: 'New Application Received', description: `${latestApps[0]?.candidate?.name || 'Candidate'} applied for ${latestApps[0]?.job?.jobTitle || 'a job'}`, time: '2 minutes ago' },
@@ -2030,7 +2031,25 @@ exports.uploadEmployerLogo = async (req, res) => {
     }
 
     const userId = req.user._id;
-    const logoUrl = `${req.protocol}://${req.get('host')}/uploads/employer-logos/${req.file.filename}`;
+    const fs = require('fs');
+    const Attachment = require('../models/Attachment');
+    const fileData = fs.readFileSync(req.file.path);
+    await Attachment.findOneAndUpdate(
+      { filename: req.file.filename },
+      {
+        filename: req.file.filename,
+        data: fileData,
+        mimeType: req.file.mimetype,
+        size: req.file.size
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    fs.unlink(req.file.path, () => {});
+
+    const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+    const protocol = forwardedProto || req.protocol || 'https';
+    const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
+    const logoUrl = `${publicOrigin.replace(/\/+$/, '')}/uploads/employer-logos/${req.file.filename}`;
 
     const user = await User.findById(userId);
     let employer = await Employer.findOne({

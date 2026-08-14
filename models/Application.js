@@ -113,5 +113,6 @@ const ApplicationSchema = new mongoose.Schema({
 ApplicationSchema.index({ job: 1 });
 ApplicationSchema.index({ candidate: 1 });
 ApplicationSchema.index({ status: 1 });
+ApplicationSchema.index({ candidate: 1, status: 1, updateDate: -1 });
 
 module.exports = mongoose.model('Application', ApplicationSchema);
