@@ -1594,13 +1594,14 @@ exports.getEmployerJobDetails = async (req, res) => {
     let shortlisted = 0;
     let interviews = 0;
     let selected = 0;
+    let rejected = 0;
 
     dbApps.forEach(app => {
       const details = app.interviewDetails || {};
       let logicalStatus = app.status || 'Applied';
       
       if (logicalStatus === 'Rejected') {
-        // Rejected candidates are counted in total applications but not in pipeline stats
+        rejected += 1;
       } else if (logicalStatus === 'Offered' || logicalStatus === 'Hired') {
         selected += 1;
       } else if (
@@ -1701,7 +1702,8 @@ exports.getEmployerJobDetails = async (req, res) => {
         reviewed,
         shortlisted,
         interviews,
-        selected
+        selected,
+        rejected
       },
       recentApplicants: latestApps.map((app, index) => ({
         id: app._id,
