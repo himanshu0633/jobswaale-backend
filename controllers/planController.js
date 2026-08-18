@@ -138,6 +138,7 @@ exports.createPlan = async (req, res) => {
     const sortError = validateWholeNumber(displayOrder, 'Display order');
     if (sortError) return res.status(400).json({ message: sortError });
 
+    const candidateAccessEnabled = Boolean(showContactDetails || allowResumeDownload);
     const newPlan = new Plan(addAuditOnCreate(req, {
       category: normalizedCategory,
       planName: cleanPlanName,
@@ -146,13 +147,13 @@ exports.createPlan = async (req, res) => {
       planValidity,
       planType: normalizedPlanType,
       displayOrder: Number(displayOrder) || 0,
-      unlockCount: String(unlockCount || '').trim(),
+      unlockCount: candidateAccessEnabled ? String(unlockCount || '').trim() : '',
       freeJobPosts: Number(freeJobPosts) || 0,
       autoMailLimit: Number(autoMailLimit) || 0,
       showBadge: Boolean(showBadge),
       badge: String(badge || '').trim(),
-      showContactDetails: Boolean(showContactDetails),
-      allowResumeDownload: Boolean(allowResumeDownload),
+      showContactDetails: candidateAccessEnabled,
+      allowResumeDownload: candidateAccessEnabled,
       employerFeatures: Array.isArray(employerFeatures) ? employerFeatures.map(item => String(item || '').trim()).filter(Boolean) : [],
       offerEnabled: Boolean(offerEnabled),
       offerTitle: String(offerTitle || '').trim(),
@@ -213,6 +214,7 @@ exports.updatePlan = async (req, res) => {
     const sortError = validateWholeNumber(displayOrder, 'Display order');
     if (sortError) return res.status(400).json({ message: sortError });
 
+    const candidateAccessEnabled = Boolean(showContactDetails || allowResumeDownload);
     const updated = await Plan.findByIdAndUpdate(
       uid,
       addAuditOnUpdate(req, {
@@ -223,13 +225,13 @@ exports.updatePlan = async (req, res) => {
         planValidity,
         planType: normalizedPlanType,
         displayOrder: Number(displayOrder) || 0,
-        unlockCount: String(unlockCount || '').trim(),
+        unlockCount: candidateAccessEnabled ? String(unlockCount || '').trim() : '',
         freeJobPosts: Number(freeJobPosts) || 0,
         autoMailLimit: Number(autoMailLimit) || 0,
         showBadge: Boolean(showBadge),
         badge: String(badge || '').trim(),
-        showContactDetails: Boolean(showContactDetails),
-        allowResumeDownload: Boolean(allowResumeDownload),
+        showContactDetails: candidateAccessEnabled,
+        allowResumeDownload: candidateAccessEnabled,
         employerFeatures: Array.isArray(employerFeatures) ? employerFeatures.map(item => String(item || '').trim()).filter(Boolean) : [],
         offerEnabled: Boolean(offerEnabled),
         offerTitle: String(offerTitle || '').trim(),

@@ -25,6 +25,7 @@ const {
   getEmployerApplicationDetails,
   getEmployerCandidateProfile,
   getEmployerCandidates,
+  downloadCandidateResume,
   getEmployerInterviews,
   getEmployerReports,
   getEmployerSelected,
@@ -67,6 +68,7 @@ router.get('/messages/unread', getEmployerUnreadCount);
 router.get('/messages/:applicationId', getEmployerMessageThread);
 router.post('/messages/:applicationId', uploadMessageAttachment, sendEmployerMessage);
 router.get('/candidateProfile/:id', getEmployerCandidateProfile);
+router.get('/candidates/:id/resume-download', downloadCandidateResume);
 router.get('/candidates', getEmployerCandidates);
 router.get('/interviews', getEmployerInterviews);
 router.get('/reports', getEmployerReports);

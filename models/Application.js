@@ -51,8 +51,12 @@ const ApplicationSchema = new mongoose.Schema({
     },
     status: {
       type: String,
-      enum: ['Scheduled', 'Completed', 'Rescheduled', 'Cancelled'],
+      enum: ['Scheduled', 'On Hold', 'Completed', 'Rescheduled', 'Cancelled'],
       default: 'Scheduled'
+    },
+    onHold: {
+      type: Boolean,
+      default: false
     },
     interviewer: {
       type: String,

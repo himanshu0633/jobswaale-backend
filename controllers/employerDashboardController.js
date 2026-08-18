@@ -1,4 +1,6 @@
 const Employer = require('../models/Employer');
+const fs = require('fs');
+const path = require('path');
 const Job = require('../models/Job');
 const Jobseeker = require('../models/Jobseeker');
 const Application = require('../models/Application');
@@ -15,6 +17,8 @@ const Payment = require('../models/Payment');
 const TalentPool = require('../models/TalentPool');
 const User = require('../models/User');
 const SupportTicket = require('../models/SupportTicket');
+const Attachment = require('../models/Attachment');
+const EmployerResumeUnlock = require('../models/EmployerResumeUnlock');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
 const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
 const {
@@ -35,7 +39,10 @@ const getEmployerShowContactDetails = async (userId) => {
       $or: [{ userId }, { login: userId }],
       isDeleted: { $ne: true }
     }).populate('currentPlan');
-    return employer?.currentPlan?.showContactDetails === true;
+    const plan = employer?.currentPlan;
+    const planEndDate = employer?.planValidity || plan?.endDate || null;
+    const isPlanActive = !planEndDate || new Date(planEndDate).getTime() >= Date.now();
+    return Boolean(isPlanActive && plan?.showContactDetails === true && plan?.allowResumeDownload === true && getUnlockLimit(plan) > 0);
   } catch (err) {
     console.error(err);
     return false;
@@ -53,7 +60,7 @@ const getEmployerAllowResumeDownload = async (userId) => {
     const isPaidPlan = plan?.planType === 'Paid' || Number(plan?.cost || 0) > 0;
     const isPlanActive = !planEndDate || new Date(planEndDate).getTime() >= Date.now();
 
-    return Boolean(isPaidPlan && isPlanActive && plan?.allowResumeDownload === true);
+    return Boolean(isPaidPlan && isPlanActive && plan?.allowResumeDownload === true && plan?.showContactDetails === true && getUnlockLimit(plan) > 0);
   } catch (err) {
     console.error(err);
     return false;
@@ -114,6 +121,14 @@ const getPlanEndDate = (plan, startDate = new Date()) => {
   };
 
   return addDays(startDate, validityDays[plan?.planValidity] || 30);
+};
+
+const getUnlockLimit = (plan) => {
+  const rawValue = String(plan?.unlockCount || '').trim();
+  if (!rawValue) return 0;
+  if (/unlimited/i.test(rawValue)) return Number.POSITIVE_INFINITY;
+  const parsed = Number(rawValue.replace(/[^\d]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const getEmployerPlanUsage = async ({ userId, employerId, plan, allJobs = null, billingHistory = null }) => {
@@ -306,98 +321,25 @@ const formatDisplayDate = (value) => {
 
 const ensureApplicationsExist = async (userId) => {
   try {
-    // 1. Get employer's jobs
-    let jobs = await Job.find({ login: userId, isDeleted: { $ne: true } });
+    const employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    }).lean();
+    const loginIds = [userId, employer?.userId, employer?.login].filter(Boolean);
+    const companyName = employer?.companyName;
+    const ownershipFilter = {
+      $or: [
+        { login: { $in: loginIds } },
+        ...(companyName ? [{ companyName }] : [])
+      ]
+    };
 
-    // If no jobs exist for this recruiter, return empty array immediately
-    if (jobs.length === 0) {
-      return [];
-    }
-
-    const jobIds = jobs.map(j => j._id);
-
-    // 2. Check if we need to seed applications
-    const existingAppsCount = await Application.countDocuments({ job: { $in: jobIds } });
-
-    // Seed 6 new candidate applications if there are fewer than 3 applications
-    if (existingAppsCount < 3) {
-      const mockCandidates = [
-        { name: 'Rohan Malhotra', email: 'rohan@gmail.com', city: 'Delhi', state: 'Delhi', experience: 'Fresher', matchScore: 78, skills: ['JS', 'React', 'CSS'], phone: '9123456780', gender: 'Male' },
-        { name: 'Kirti Sen', email: 'kirti@gmail.com', city: 'Indore', state: 'Madhya Pradesh', experience: '1+ Years', matchScore: 82, skills: ['HTML', 'CSS', 'Figma'], phone: '9123456781', gender: 'Female' },
-        { name: 'Aditya Roy', email: 'aditya@gmail.com', city: 'Bangalore', state: 'Karnataka', experience: '2+ Years', matchScore: 91, skills: ['Node', 'Express', 'MongoDB'], phone: '9123456782', gender: 'Male' },
-        { name: 'Shweta Tiwari', email: 'shweta@gmail.com', city: 'Pune', state: 'Maharashtra', experience: '5+ Years', matchScore: 88, skills: ['React', 'Angular', 'Vue'], phone: '9123456783', gender: 'Female' },
-        { name: 'Gaurav Das', email: 'gaurav@gmail.com', city: 'Kolkata', state: 'West Bengal', experience: '2+ Years', matchScore: 74, skills: ['Python', 'Flask', 'MySQL'], phone: '9123456784', gender: 'Male' },
-        { name: 'Ritu Phogat', email: 'ritu@gmail.com', city: 'Gurugram', state: 'Haryana', experience: '1+ Years', matchScore: 85, skills: ['JS', 'React', 'Node'], phone: '9123456785', gender: 'Female' }
-      ];
-
-      let qualGrad = await Qualification.findOne();
-      if (!qualGrad) {
-        qualGrad = await Qualification.create({ name: 'Graduate' });
-      }
-
-      let jobCatDefault = await JobCategory.findOne();
-      if (!jobCatDefault) {
-        jobCatDefault = await JobCategory.create({ categoryName: 'Software Engineering' });
-      }
-
-      // We attach the seeded applications to the first job
-      const targetJob = jobs[0];
-
-      for (const mc of mockCandidates) {
-        // Find or create User
-        let user = await User.findOne({ email: mc.email });
-        if (!user) {
-          user = await User.create({
-            email: mc.email,
-            password: '$2b$10$hashedpasswordplaceholder',
-            role: 'Jobseeker',
-            accountType: 'jobseeker',
-            firstName: mc.name.split(' ')[0],
-            lastName: mc.name.split(' ').slice(1).join(' ') || ''
-          });
-        }
-
-        // Find or create Jobseeker
-        let seeker = await Jobseeker.findOne({ userId: user._id });
-        if (!seeker) {
-          seeker = await Jobseeker.create({
-            userId: user._id,
-            login: user._id,
-            name: mc.name,
-            phone: mc.phone,
-            gender: mc.gender,
-            city: mc.city,
-            state: mc.state,
-            country: 'India',
-            district: mc.city,
-            address: 'Not Specified',
-            pinCode: '560001',
-            experience: mc.experience,
-            expectedSalary: 'Rs. 4,00,000 - Rs. 8,00,000 Per Annum',
-            qualification: qualGrad._id,
-            jobCategory: jobCatDefault._id
-          });
-        }
-
-        // Create Application in 'Applied' status
-        await Application.create({
-          job: targetJob._id,
-          candidate: seeker._id,
-          status: 'Applied',
-          matchScore: mc.matchScore,
-          appliedDate: new Date()
-        });
-      }
-    }
-
-    // Return the populated jobs list
-    const populatedJobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
+    return await Job.find({ ...ownershipFilter, isDeleted: { $ne: true } })
       .populate('jobType', 'jobType')
       .populate('jobCategory', 'categoryName')
       .lean();
-    return populatedJobs;
   } catch (err) {
-    console.error('Error loading or seeding employer jobs/applications:', err);
+    console.error('Error loading employer jobs/applications:', err);
     return [];
   }
 };
@@ -1093,6 +1035,85 @@ exports.getEmployerApplicationDetails = async (req, res) => {
   }
 };
 
+exports.downloadCandidateResume = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const candidateId = req.params.id;
+
+    const employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    }).populate('currentPlan');
+
+    if (!employer) {
+      return res.status(404).json({ message: 'Employer profile was not found.' });
+    }
+
+    const plan = employer.currentPlan;
+    const planEndDate = employer.planValidity || plan?.endDate || null;
+    const isPaidPlan = plan?.planType === 'Paid' || Number(plan?.cost || 0) > 0;
+    const isPlanActive = !planEndDate || new Date(planEndDate).getTime() >= Date.now();
+    const accessEnabled = Boolean(isPaidPlan && isPlanActive && plan?.allowResumeDownload === true && plan?.showContactDetails === true && getUnlockLimit(plan) > 0);
+
+    if (!accessEnabled) {
+      return res.status(403).json({ message: 'Resume downloads are not supported under your current plan.' });
+    }
+
+    const candidate = await Jobseeker.findOne({ _id: candidateId, isDeleted: { $ne: true } }).select('resume name');
+    if (!candidate?.resume) {
+      return res.status(404).json({ message: 'Resume was not found for this candidate.' });
+    }
+
+    const planId = plan?._id || null;
+    const existingUnlock = await EmployerResumeUnlock.findOne({
+      employer: employer._id,
+      candidate: candidate._id,
+      plan: planId,
+      isDeleted: { $ne: true }
+    });
+
+    if (!existingUnlock) {
+      const unlockLimit = getUnlockLimit(plan);
+      const usedUnlocks = await EmployerResumeUnlock.countDocuments({
+        employer: employer._id,
+        plan: planId,
+        isDeleted: { $ne: true }
+      });
+
+      if (usedUnlocks >= unlockLimit) {
+        return res.status(403).json({
+          message: `Your ${plan.planName} plan allows ${Number.isFinite(unlockLimit) ? unlockLimit : 'unlimited'} resume unlock${unlockLimit === 1 ? '' : 's'}. Please upgrade your plan to download more resumes.`
+        });
+      }
+
+      await EmployerResumeUnlock.create(addAuditOnCreate(req, {
+        employer: employer._id,
+        login: userId,
+        candidate: candidate._id,
+        plan: planId
+      }));
+    }
+
+    const filename = path.basename(candidate.resume);
+    const attachment = await Attachment.findOne({ filename });
+    if (attachment) {
+      res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Length', attachment.size || attachment.data.length);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(attachment.data);
+    }
+
+    const localPath = path.join(__dirname, '..', candidate.resume.replace(/^\/+/, ''));
+    if (fs.existsSync(localPath)) {
+      return res.download(localPath, filename);
+    }
+
+    return res.status(404).json({ message: 'Resume file could not be found.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getEmployerInterviews = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -1106,7 +1127,7 @@ exports.getEmployerInterviews = async (req, res) => {
 
     if (!jobIds.length) {
       return res.json({
-        stats: { total: 0, scheduled: 0, completed: 0, rescheduled: 0, cancelled: 0 },
+        stats: { total: 0, scheduled: 0, onHold: 0, completed: 0, rescheduled: 0, cancelled: 0 },
         filters: { jobTitles: [], types: [] },
         interviews: [],
         pagination: { page: 1, limit: Number(query.limit) || 10, total: 0, totalPages: 1 }
@@ -1142,8 +1163,8 @@ exports.getEmployerInterviews = async (req, res) => {
       if (!candidate || !job) return null;
 
       const details = app.interviewDetails || {};
-      const interviewDate = details.date || app.updateDate || app.appliedDate;
-      const interviewStatus = details.status || 'Scheduled';
+      const interviewStatus = details.onHold ? 'On Hold' : (details.status || 'Scheduled');
+      const interviewDate = interviewStatus === 'On Hold' ? null : (details.date || app.updateDate || app.appliedDate);
 
       return {
         id: app._id,
@@ -1173,7 +1194,10 @@ exports.getEmployerInterviews = async (req, res) => {
     const stats = interviews.reduce((acc, item) => {
       const key = String(item.status || 'Scheduled').toLowerCase();
       return { ...acc, total: acc.total + 1, [key]: (acc[key] || 0) + 1 };
-    }, { total: 0, scheduled: 0, completed: 0, rescheduled: 0, cancelled: 0 });
+    }, { total: 0, scheduled: 0, 'on hold': 0, completed: 0, rescheduled: 0, cancelled: 0 });
+
+    stats.onHold = stats['on hold'] || 0;
+    delete stats['on hold'];
 
     const rawSearch = String(query.search || '').trim().toLowerCase();
     const normalizedType = query.type === 'Telephonic' ? 'Telephonic' : query.type;
@@ -1511,7 +1535,20 @@ exports.getEmployerReports = async (req, res) => {
 exports.getEmployerJobDetails = async (req, res) => {
   try {
     const userId = req.user._id;
-    const job = await Job.findOne({ _id: req.params.id, login: userId, isDeleted: { $ne: true } })
+    const employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    }).lean();
+    const loginIds = [userId, employer?.userId, employer?.login].filter(Boolean);
+    const companyName = employer?.companyName || req.user.companyName;
+    const ownershipFilter = {
+      $or: [
+        { login: { $in: loginIds } },
+        ...(companyName ? [{ companyName }] : [])
+      ]
+    };
+
+    const job = await Job.findOne({ _id: req.params.id, ...ownershipFilter, isDeleted: { $ne: true } })
       .populate('jobType', 'jobType')
       .populate('jobCategory', 'categoryName')
       .populate('qualification', 'name')
@@ -1521,10 +1558,7 @@ exports.getEmployerJobDetails = async (req, res) => {
       return res.status(404).json({ message: 'Job not found.' });
     }
 
-        const status = getJobDisplayStatus(job);
-    
-    // Ensure applications exist for this employer first
-    await ensureApplicationsExist(userId);
+    const status = getJobDisplayStatus(job);
 
     const applications = await Application.countDocuments({ job: job._id });
     const reviewed = await Application.countDocuments({ job: job._id, status: 'Reviewed' });
@@ -1536,9 +1570,12 @@ exports.getEmployerJobDetails = async (req, res) => {
     const impressions = Math.max(views * 4, views);
 
     const latestApps = await Application.find({ job: job._id })
-      .populate('candidate', 'name userId')
-      .populate({ path: 'candidate', populate: { path: 'userId', select: 'email' } })
-      .sort({ appliedDate: -1 })
+      .populate({
+        path: 'candidate',
+        select: 'name phone userId city state preferredLocation experience',
+        populate: { path: 'userId', select: 'email phone firstName lastName' }
+      })
+      .sort({ appliedDate: -1, createDate: -1 })
       .limit(5)
       .lean();
 
@@ -1616,10 +1653,13 @@ exports.getEmployerJobDetails = async (req, res) => {
       },
       recentApplicants: latestApps.map((app, index) => ({
         id: app._id,
-        name: app.candidate?.name || 'N/A',
-        email: app.candidate?.userId?.email || '',
+        candidateId: app.candidate?._id || '',
+        name: app.candidate?.name || [app.candidate?.userId?.firstName, app.candidate?.userId?.lastName].filter(Boolean).join(' ') || 'N/A',
+        email: app.candidate?.userId?.email || app.candidate?.phone || app.candidate?.userId?.phone || '',
+        location: [app.candidate?.city, app.candidate?.state].filter(Boolean).join(', ') || app.candidate?.preferredLocation || '',
+        experience: app.candidate?.experience || '',
         appliedAt: formatDate(app.appliedDate || app.createDate),
-        matchScore: app.matchScore || 70,
+        matchScore: app.matchScore || 0,
         status: app.status
       }))
     });
@@ -1691,7 +1731,7 @@ exports.getEmployerDashboard = async (req, res) => {
 
     // Group application counts by job and status
     const appCounts = await Application.aggregate([
-      { $match: { job: { $in: jobs.map(j => j._id) } } },
+      { $match: { job: { $in: allJobs.map(j => j._id) } } },
       { $group: { _id: { job: "$job", status: "$status" }, count: { $sum: 1 } } }
     ]);
 
@@ -1767,6 +1807,7 @@ exports.getEmployerDashboard = async (req, res) => {
         utilization
       },
       actionCenter: {
+        activeJobs: jobStats.active,
         newApplications: appliedCount,
         interviews: interviewCount,
         candidates: shortlistedCount,
@@ -2923,7 +2964,7 @@ exports.updateSelectedOffer = async (req, res) => {
 exports.scheduleApplicationInterview = async (req, res) => {
   try {
     const { id } = req.params;
-    const { date, time, type, status, interviewer, locationOrLink, notes } = req.body;
+    const { date, time, type, status, interviewer, locationOrLink, notes, onHold } = req.body;
 
     const application = await Application.findById(id).populate('job', 'login contactPerson');
     if (!application) {
@@ -2935,19 +2976,25 @@ exports.scheduleApplicationInterview = async (req, res) => {
     }
 
     const normalizedType = type === 'Telephonic' ? 'Phone Call' : type;
+    const isOnHold = Boolean(onHold);
 
     application.status = 'Interview';
     application.interviewDetails = {
       date: date ? new Date(date) : application.interviewDetails?.date,
       time: time || application.interviewDetails?.time || '',
       type: normalizedType,
-      status: status || application.interviewDetails?.status || 'Scheduled',
+      status: isOnHold ? 'On Hold' : (status || application.interviewDetails?.status || 'Scheduled'),
+      onHold: isOnHold,
       interviewer: interviewer || application.interviewDetails?.interviewer || application.job?.contactPerson || req.user.firstName || req.user.companyName || '',
       locationOrLink: locationOrLink ?? application.interviewDetails?.locationOrLink ?? '',
       notes: notes ?? application.interviewDetails?.notes ?? ''
     };
 
     await application.save();
+
+    if (isOnHold) {
+      return res.json({ message: 'Application moved to interview on hold.', application });
+    }
 
     // Send application status update email to jobseeker
     const { sendApplicationStatusEmail } = require('../utils/jobNotifications');
