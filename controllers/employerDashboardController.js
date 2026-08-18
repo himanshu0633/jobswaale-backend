@@ -1162,6 +1162,14 @@ exports.getEmployerInterviews = async (req, res) => {
       })
       .lean();
 
+    console.log('DB_APPS_FETCHED:', JSON.stringify(dbApps.map(app => ({
+      id: app._id,
+      status: app.status,
+      candidate: app.candidate?.name,
+      job: app.job?.jobTitle,
+      interviewDetails: app.interviewDetails
+    }))));
+
     const normalizeInterviewType = (type) => {
       if (type === 'Phone Call') return 'Telephonic';
       return type || 'Other';
@@ -1178,11 +1186,10 @@ exports.getEmployerInterviews = async (req, res) => {
       if (app.status === 'Shortlisted') {
         interviewStatus = 'Pending Interview';
       } else {
-        if (details.onHold) return null; // Exclude On Hold
         if (details.status === 'Completed' || details.status === 'Cancelled') return null; // Exclude Completed/Cancelled
-        interviewStatus = details.status || 'Scheduled';
+        interviewStatus = details.onHold ? 'On Hold' : (details.status || 'Scheduled');
       }
-      const interviewDate = app.status === 'Shortlisted' ? null : (details.date || app.updateDate || app.appliedDate);
+      const interviewDate = (app.status === 'Shortlisted' || interviewStatus === 'On Hold') ? null : (details.date || app.updateDate || app.appliedDate);
 
       return {
         id: app._id,
@@ -1210,9 +1217,9 @@ exports.getEmployerInterviews = async (req, res) => {
     }).filter(Boolean);
 
     const stats = interviews.reduce((acc, item) => {
-      const key = item.status === 'Pending Interview' ? 'pending' : 'scheduled';
+      const key = item.status === 'Pending Interview' ? 'pending' : (item.status === 'On Hold' ? 'onHold' : 'scheduled');
       return { ...acc, total: acc.total + 1, [key]: (acc[key] || 0) + 1 };
-    }, { total: 0, pending: 0, scheduled: 0 });
+    }, { total: 0, pending: 0, scheduled: 0, onHold: 0 });
 
     const rawSearch = String(query.search || '').trim().toLowerCase();
     const normalizedType = query.type === 'Telephonic' ? 'Telephonic' : query.type;
