@@ -1587,11 +1587,36 @@ exports.getEmployerJobDetails = async (req, res) => {
 
     const status = getJobDisplayStatus(job);
 
-    const applications = await Application.countDocuments({ job: job._id });
-    const reviewed = await Application.countDocuments({ job: job._id, status: 'Reviewed' });
-    const shortlisted = await Application.countDocuments({ job: job._id, status: 'Shortlisted' });
-    const interviews = await Application.countDocuments({ job: job._id, status: 'Interview' });
-    const selected = await Application.countDocuments({ job: job._id, status: 'Offered' });
+    const dbApps = await Application.find({ job: job._id }).lean();
+    
+    let applications = dbApps.length;
+    let reviewed = 0;
+    let shortlisted = 0;
+    let interviews = 0;
+    let selected = 0;
+
+    dbApps.forEach(app => {
+      const details = app.interviewDetails || {};
+      let logicalStatus = app.status || 'Applied';
+      
+      if (logicalStatus === 'Rejected') {
+        // Rejected candidates are counted in total applications but not in pipeline stats
+      } else if (logicalStatus === 'Offered' || logicalStatus === 'Hired') {
+        selected += 1;
+      } else if (
+        details.onHold || 
+        details.status === 'On Hold' || 
+        details.status === 'Scheduled' || 
+        details.status === 'Rescheduled' || 
+        logicalStatus === 'Interview'
+      ) {
+        interviews += 1;
+      } else if (logicalStatus === 'Shortlisted') {
+        shortlisted += 1;
+      } else if (logicalStatus === 'Reviewed') {
+        reviewed += 1;
+      }
+    });
     
     const views = job.views || 0;
     const impressions = job.impressions || 0;
