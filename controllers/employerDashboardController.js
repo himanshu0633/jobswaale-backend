@@ -942,6 +942,20 @@ exports.getEmployerApplicationDetails = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const appDoc = await Application.findById(id).populate('job', 'login');
+    if (!appDoc) {
+      return res.status(404).json({ message: 'Application not found.' });
+    }
+    if (String(appDoc.job?.login) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'You are not allowed to view this application.' });
+    }
+
+    if (appDoc.status === 'Applied') {
+      appDoc.status = 'Reviewed';
+      appDoc.previousStatus = 'Applied';
+      await appDoc.save();
+    }
+
     const application = await Application.findById(id)
       .populate({
         path: 'job',
@@ -965,10 +979,6 @@ exports.getEmployerApplicationDetails = async (req, res) => {
 
     if (!application || !application.job || !application.candidate) {
       return res.status(404).json({ message: 'Application not found.' });
-    }
-
-    if (String(application.job.login) !== String(req.user._id)) {
-      return res.status(403).json({ message: 'You are not allowed to view this application.' });
     }
 
     const showContacts = await getEmployerShowContactDetails(req.user._id);
