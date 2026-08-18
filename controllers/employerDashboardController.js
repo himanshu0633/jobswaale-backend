@@ -1162,14 +1162,6 @@ exports.getEmployerInterviews = async (req, res) => {
       })
       .lean();
 
-    console.log('DB_APPS_FETCHED:', JSON.stringify(dbApps.map(app => ({
-      id: app._id,
-      status: app.status,
-      candidate: app.candidate?.name,
-      job: app.job?.jobTitle,
-      interviewDetails: app.interviewDetails
-    }))));
-
     const normalizeInterviewType = (type) => {
       if (type === 'Phone Call') return 'Telephonic';
       return type || 'Other';
@@ -1182,14 +1174,17 @@ exports.getEmployerInterviews = async (req, res) => {
       if (!candidate || !job) return null;
 
       const details = app.interviewDetails || {};
+      if (details.status === 'Completed' || details.status === 'Cancelled') return null; // Exclude Completed/Cancelled
+
       let interviewStatus = 'Scheduled';
-      if (app.status === 'Shortlisted') {
+      if (details.onHold || details.status === 'On Hold') {
+        interviewStatus = 'On Hold';
+      } else if (app.status === 'Shortlisted') {
         interviewStatus = 'Pending Interview';
       } else {
-        if (details.status === 'Completed' || details.status === 'Cancelled') return null; // Exclude Completed/Cancelled
-        interviewStatus = details.onHold ? 'On Hold' : (details.status || 'Scheduled');
+        interviewStatus = details.status || 'Scheduled';
       }
-      const interviewDate = (app.status === 'Shortlisted' || interviewStatus === 'On Hold') ? null : (details.date || app.updateDate || app.appliedDate);
+      const interviewDate = (interviewStatus === 'Pending Interview' || interviewStatus === 'On Hold') ? null : (details.date || app.updateDate || app.appliedDate);
 
       return {
         id: app._id,

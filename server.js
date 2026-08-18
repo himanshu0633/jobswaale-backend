@@ -31,19 +31,6 @@ app.use(cors(corsOptions));
 initSocket(server, corsOptions);
 app.use(express.json({ limit: '10mb' }));
 
-app.get('/api/debug-apps', async (req, res) => {
-  try {
-    const Application = require('./models/Application');
-    const apps = await Application.find({})
-      .populate('job', 'jobTitle login')
-      .populate('candidate', 'name')
-      .lean();
-    res.json(apps);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.use(async (req, res, next) => {
   try {
     await connectDB();
