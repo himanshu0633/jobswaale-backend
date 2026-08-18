@@ -1756,7 +1756,14 @@ exports.getEmployerDashboard = async (req, res) => {
       .limit(5)
       .lean();
 
-    const interviewApps = await Application.find({ job: { $in: jobIds }, status: 'Interview' })
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const interviewApps = await Application.find({
+      job: { $in: jobIds },
+      status: 'Interview',
+      'interviewDetails.date': { $gte: todayStart }
+    })
       .populate('candidate', 'name')
       .populate('job', 'jobTitle')
       .sort({ "interviewDetails.date": 1 })
