@@ -4,6 +4,7 @@ const Jobseeker = require('../models/Jobseeker');
 const Payment = require('../models/Payment');
 const JobType = require('../models/JobType');
 const JobCategory = require('../models/JobCategory');
+const Application = require('../models/Application');
 
 // Mock data fallbacks for development/clean installations
 const initialJobs = [
@@ -56,17 +57,27 @@ exports.getJobReports = async (req, res) => {
         .populate('jobCategory')
         .populate('jobType');
       
+      const jobIds = dbJobs.map(job => job._id);
+      const appCounts = await Application.aggregate([
+        { $match: { job: { $in: jobIds } } },
+        { $group: { _id: '$job', count: { $sum: 1 } } }
+      ]);
+      const appCountMap = appCounts.reduce((acc, item) => {
+        acc[String(item._id)] = item.count;
+        return acc;
+      }, {});
+
       jobs = dbJobs.map((job, idx) => ({
         id: `JOB-0${idx + 1}`,
         title: job.jobTitle,
         employer: job.companyName,
         postedDate: new Date(job.createDate || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
         expiryDate: job.planValidity ? new Date(job.planValidity).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : 'N/A',
-        applications: Math.round(job.vacancies * 3 + idx),
-        views: Math.round(job.vacancies * 25 + idx * 3),
+        applications: appCountMap[String(job._id)] || 0,
+        views: job.views || 0,
         status: job.status === 'active' || job.status === 'featured' ? 'Active' : job.status === 'closed' ? 'Expired' : job.status === 'inactive' ? 'Inactive' : 'Pending',
-        type: job.jobType ? job.jobType.name : 'Full Time',
-        industry: job.jobCategory ? job.jobCategory.name : 'IT',
+        type: job.jobType ? (job.jobType.jobType || job.jobType.name) : 'Full Time',
+        industry: job.jobCategory ? (job.jobCategory.categoryName || job.jobCategory.name) : 'IT',
         location: job.city
       }));
     } else {
@@ -81,7 +92,7 @@ exports.getJobReports = async (req, res) => {
       { $match: { isDeleted: { $ne: true } } },
       { $group: { _id: null, total: { $sum: '$vacancies' } } }
     ]) : [{ total: 900 }];
-    const totalAppsCount = dbCount > 0 ? (totalVacancies[0] ? totalVacancies[0].total * 5 : 4582) : 4582;
+    const totalAppsCount = dbCount > 0 ? await Application.countDocuments({ isDeleted: { $ne: true } }) : 4582;
 
     res.json({
       stats: {

@@ -59,6 +59,12 @@ exports.getJobs = async (req, res) => {
       .populate('currentPlan')
       .populate('login', 'email')
       .populate('updatedLogin', 'email');
+
+    if (list && list.length > 0) {
+      const jobIds = list.map(job => job._id);
+      Job.updateMany({ _id: { $in: jobIds } }, { $inc: { impressions: 1 } }).catch(err => console.error('Error updating impressions:', err));
+    }
+
     res.json(list);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -269,7 +275,11 @@ exports.getJobById = async (req, res) => {
       ? { $or: [{ _id: id }, { slug: id }], isDeleted: { $ne: true } }
       : { slug: id, isDeleted: { $ne: true } };
 
-    const jobDoc = await Job.findOne(query)
+    const jobDoc = await Job.findOneAndUpdate(
+      query,
+      { $inc: { views: 1 } },
+      { new: true }
+    )
       .populate('jobCategory')
       .populate('jobType')
       .populate('qualification');

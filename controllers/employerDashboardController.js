@@ -1566,8 +1566,8 @@ exports.getEmployerJobDetails = async (req, res) => {
     const interviews = await Application.countDocuments({ job: job._id, status: 'Interview' });
     const selected = await Application.countDocuments({ job: job._id, status: 'Offered' });
     
-    const views = Math.max(applications * 26, Number(job.vacancies || 1) * 120);
-    const impressions = Math.max(views * 4, views);
+    const views = job.views || 0;
+    const impressions = job.impressions || 0;
 
     const latestApps = await Application.find({ job: job._id })
       .populate({

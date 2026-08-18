@@ -198,6 +198,14 @@ const JobSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  views: {
+    type: Number,
+    default: 0
+  },
+  impressions: {
+    type: Number,
+    default: 0
+  },
   isDeleted: {
     type: Boolean,
     default: false
