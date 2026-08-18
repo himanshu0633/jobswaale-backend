@@ -1145,7 +1145,7 @@ exports.getEmployerInterviews = async (req, res) => {
       });
     }
 
-    const dbApps = await Application.find({ job: { $in: jobIds }, status: 'Interview' })
+    const dbApps = await Application.find({ job: { $in: jobIds }, status: { $in: ['Shortlisted', 'Interview'] } })
       .populate({
         path: 'job',
         populate: [
@@ -1174,8 +1174,15 @@ exports.getEmployerInterviews = async (req, res) => {
       if (!candidate || !job) return null;
 
       const details = app.interviewDetails || {};
-      const interviewStatus = details.onHold ? 'On Hold' : (details.status || 'Scheduled');
-      const interviewDate = interviewStatus === 'On Hold' ? null : (details.date || app.updateDate || app.appliedDate);
+      let interviewStatus = 'Scheduled';
+      if (app.status === 'Shortlisted') {
+        interviewStatus = 'Pending Interview';
+      } else {
+        if (details.onHold) return null; // Exclude On Hold
+        if (details.status === 'Completed' || details.status === 'Cancelled') return null; // Exclude Completed/Cancelled
+        interviewStatus = details.status || 'Scheduled';
+      }
+      const interviewDate = app.status === 'Shortlisted' ? null : (details.date || app.updateDate || app.appliedDate);
 
       return {
         id: app._id,
@@ -1203,12 +1210,9 @@ exports.getEmployerInterviews = async (req, res) => {
     }).filter(Boolean);
 
     const stats = interviews.reduce((acc, item) => {
-      const key = String(item.status || 'Scheduled').toLowerCase();
+      const key = item.status === 'Pending Interview' ? 'pending' : 'scheduled';
       return { ...acc, total: acc.total + 1, [key]: (acc[key] || 0) + 1 };
-    }, { total: 0, scheduled: 0, 'on hold': 0, completed: 0, rescheduled: 0, cancelled: 0 });
-
-    stats.onHold = stats['on hold'] || 0;
-    delete stats['on hold'];
+    }, { total: 0, pending: 0, scheduled: 0 });
 
     const rawSearch = String(query.search || '').trim().toLowerCase();
     const normalizedType = query.type === 'Telephonic' ? 'Telephonic' : query.type;
