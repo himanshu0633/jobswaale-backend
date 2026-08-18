@@ -787,7 +787,12 @@ exports.getEmployerApplications = async (req, res) => {
 
       const matchesSearch = !rawSearch || searchable.includes(rawSearch);
       const matchesJob = !query.jobTitle || application.jobTitle === query.jobTitle;
-      const matchesStatus = !query.status || application.status === query.status;
+      let matchesStatus = true;
+      if (query.status) {
+        matchesStatus = application.status === query.status;
+      } else if (query.statusGroup === 'queue') {
+        matchesStatus = ['Applied', 'Reviewed'].includes(application.status);
+      }
       const matchesExperience = !query.experience || application.experience === query.experience;
       const matchesDate = !query.appliedAfter || application.appliedDate >= query.appliedAfter;
 
