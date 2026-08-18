@@ -11,7 +11,7 @@ const { initSocket } = require('./realtime/socket');
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 // Connect to MongoDB
-connectDB();
+connectDB().catch(err => console.error('Initial MongoDB connection failed:', err.message));
 
 const app = express();
 const server = http.createServer(app);
