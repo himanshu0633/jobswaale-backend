@@ -30,6 +30,16 @@ const corsOptions = {
 app.use(cors(corsOptions));
 initSocket(server, corsOptions);
 app.use(express.json({ limit: '10mb' }));
+
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('Database connection middleware error:', err);
+    res.status(500).json({ message: 'Database connection error. Please try again.' });
+  }
+});
 app.get('/uploads/messages/:filename', async (req, res, next) => {
   try {
     const Attachment = require('./models/Attachment');

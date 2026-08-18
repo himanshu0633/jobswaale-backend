@@ -19,7 +19,7 @@ const connectDB = async () => {
   } catch (error) {
     console.error(`Error Connecting to MongoDB: ${error.message}`);
     console.error('Check your internet/VPN, MongoDB Atlas network access IP whitelist, and MONGO_URI in .env.');
-    process.exit(1);
+    throw error;
   }
 };
 
