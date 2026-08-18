@@ -774,7 +774,7 @@ exports.getEmployerApplications = async (req, res) => {
     }).filter(Boolean);
 
     const rawSearch = String(query.search || '').trim().toLowerCase();
-    applications = applications.filter((application) => {
+    const applicationsPreStatusFilter = applications.filter((application) => {
       const searchable = [
         application.name,
         application.email,
@@ -787,12 +787,6 @@ exports.getEmployerApplications = async (req, res) => {
 
       const matchesSearch = !rawSearch || searchable.includes(rawSearch);
       const matchesJob = !query.jobTitle || application.jobTitle === query.jobTitle;
-      let matchesStatus = true;
-      if (query.status) {
-        matchesStatus = application.status === query.status;
-      } else if (query.statusGroup === 'queue') {
-        matchesStatus = ['Applied', 'Reviewed'].includes(application.status);
-      }
       const matchesExperience = !query.experience || application.experience === query.experience;
       const matchesDate = !query.appliedAfter || application.appliedDate >= query.appliedAfter;
 
@@ -804,16 +798,27 @@ exports.getEmployerApplications = async (req, res) => {
         }
       }
 
-      return matchesSearch && matchesJob && matchesStatus && matchesExperience && matchesDate && matchesScore;
+      return matchesSearch && matchesJob && matchesExperience && matchesDate && matchesScore;
     });
 
-    applications.sort((a, b) => b.appliedDate.localeCompare(a.appliedDate) || b.matchScore - a.matchScore);
-    const { items, pagination } = paginate(applications, query.page, query.limit);
-    const statusCounts = applications.reduce((acc, item) => ({ ...acc, [item.status]: (acc[item.status] || 0) + 1 }), {});
+    const statusCounts = applicationsPreStatusFilter.reduce((acc, item) => ({ ...acc, [item.status]: (acc[item.status] || 0) + 1 }), {});
+
+    const filteredApplications = applicationsPreStatusFilter.filter((application) => {
+      let matchesStatus = true;
+      if (query.status) {
+        matchesStatus = application.status === query.status;
+      } else if (query.statusGroup === 'queue') {
+        matchesStatus = ['Applied', 'Reviewed'].includes(application.status);
+      }
+      return matchesStatus;
+    });
+
+    filteredApplications.sort((a, b) => b.appliedDate.localeCompare(a.appliedDate) || b.matchScore - a.matchScore);
+    const { items, pagination } = paginate(filteredApplications, query.page, query.limit);
 
     res.json({
       stats: {
-        total: applications.length,
+        total: applicationsPreStatusFilter.length,
         new: statusCounts.Applied || 0,
         shortlisted: statusCounts.Shortlisted || 0,
         interviews: statusCounts.Interview || 0,
@@ -829,7 +834,7 @@ exports.getEmployerApplications = async (req, res) => {
       },
       filters: {
         jobTitles: [...new Set(jobs.map(job => job.jobTitle).filter(Boolean))],
-        experiences: [...new Set(applications.map(item => item.experience).filter(Boolean))]
+        experiences: [...new Set(applicationsPreStatusFilter.map(item => item.experience).filter(Boolean))]
       },
       applications: items,
       pagination
