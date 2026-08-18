@@ -819,7 +819,8 @@ exports.getEmployerApplications = async (req, res) => {
     res.json({
       stats: {
         total: applicationsPreStatusFilter.length,
-        new: statusCounts.Applied || 0,
+        applied: statusCounts.Applied || 0,
+        reviewed: statusCounts.Reviewed || 0,
         shortlisted: statusCounts.Shortlisted || 0,
         interviews: statusCounts.Interview || 0,
         rejected: statusCounts.Rejected || 0
