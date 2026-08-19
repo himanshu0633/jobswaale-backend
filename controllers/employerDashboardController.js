@@ -1174,6 +1174,7 @@ exports.downloadCandidateResume = async (req, res) => {
       return res.status(404).json({ message: 'Resume was not found for this candidate.' });
     }
 
+    let isNewUnlock = false;
     if (!access.isUnlocked) {
       if (access.unlockLimitExhausted) {
         return res.status(403).json({
@@ -1187,7 +1188,21 @@ exports.downloadCandidateResume = async (req, res) => {
         candidate: candidate._id,
         plan: access.planId
       }));
+      isNewUnlock = true;
     }
+
+    const updatedUsedUnlocks = await EmployerResumeUnlock.countDocuments({
+      employer: access.employerId,
+      plan: access.planId,
+      isDeleted: { $ne: true }
+    });
+    const remainingUnlocks = access.unlockLimit === Number.MAX_SAFE_INTEGER
+      ? 'Unlimited'
+      : String(Math.max(0, access.unlockLimit - updatedUsedUnlocks));
+
+    res.setHeader('X-Remaining-Unlocks', remainingUnlocks);
+    res.setHeader('X-Is-New-Unlock', isNewUnlock ? 'true' : 'false');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Remaining-Unlocks, X-Is-New-Unlock');
 
     const filename = path.basename(candidate.resume);
     const attachment = await Attachment.findOne({ filename });
