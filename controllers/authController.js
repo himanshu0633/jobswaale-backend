@@ -341,6 +341,9 @@ exports.login = async (req, res) => {
     });
   } catch (error) {
     console.error('Login Error:', error);
+    if (error.message && error.name !== 'TypeError' && error.name !== 'ReferenceError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -477,6 +480,9 @@ exports.googleLogin = async (req, res) => {
     });
   } catch (error) {
     console.error('Google Login Error:', error);
+    if (error.message && error.name !== 'TypeError' && error.name !== 'ReferenceError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -517,6 +523,9 @@ exports.seedAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error('Seed Admin Error:', error);
+    if (error.message && error.name !== 'TypeError' && error.name !== 'ReferenceError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -556,6 +565,9 @@ exports.createAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error('Create Admin Error:', error);
+    if (error.message && error.name !== 'TypeError' && error.name !== 'ReferenceError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -578,6 +590,9 @@ exports.forgotPassword = async (req, res) => {
     res.json({ message: 'Reset password link sent successfully! Check your email.' });
   } catch (error) {
     console.error('Forgot Password Error:', error);
+    if (error.message && error.name !== 'TypeError' && error.name !== 'ReferenceError') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
