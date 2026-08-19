@@ -33,38 +33,99 @@ const formatDate = (value) => {
   return new Date(value).toISOString();
 };
 
-const getEmployerShowContactDetails = async (userId) => {
+const checkEmployerPlanAccess = async (userId, candidateId = null) => {
   try {
     const employer = await Employer.findOne({
       $or: [{ userId }, { login: userId }],
       isDeleted: { $ne: true }
     }).populate('currentPlan');
-    const plan = employer?.currentPlan;
-    const planEndDate = employer?.planValidity || plan?.endDate || null;
-    const isPlanActive = !planEndDate || new Date(planEndDate).getTime() >= Date.now();
-    return Boolean(isPlanActive && plan?.showContactDetails === true && plan?.allowResumeDownload === true && getUnlockLimit(plan) > 0);
+
+    if (!employer || !employer.currentPlan) {
+      console.log('[DEBUG checkEmployerPlanAccess] Employer or currentPlan not found', { userId });
+      return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
+    }
+
+    const plan = employer.currentPlan;
+    const planEndDate = employer.planValidity || plan.endDate || null;
+    
+    let isPlanActive = true;
+    if (planEndDate) {
+      const planEndDateStr = String(planEndDate).toLowerCase();
+      if (planEndDateStr.includes('free') || planEndDateStr.includes('always')) {
+        isPlanActive = true;
+      } else {
+        const endTime = new Date(planEndDate).getTime();
+        if (!isNaN(endTime)) {
+          isPlanActive = endTime >= Date.now();
+        }
+      }
+    }
+
+    console.log('[DEBUG checkEmployerPlanAccess] Plan details', {
+      employer: employer.companyName || employer.login,
+      planName: plan.planName,
+      planEndDate,
+      isPlanActive,
+      showContactDetails: plan.showContactDetails,
+      allowResumeDownload: plan.allowResumeDownload
+    });
+
+    if (!isPlanActive) {
+      return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
+    }
+
+    const hasAccess = Boolean(plan.showContactDetails || plan.allowResumeDownload);
+    if (!hasAccess) {
+      return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
+    }
+
+    const unlockLimit = getUnlockLimit(plan);
+    const planId = plan._id || null;
+
+    let isUnlocked = false;
+    if (candidateId) {
+      const existing = await EmployerResumeUnlock.findOne({
+        employer: employer._id,
+        candidate: candidateId,
+        plan: planId,
+        isDeleted: { $ne: true }
+      });
+      if (existing) {
+        isUnlocked = true;
+      }
+    }
+
+    const usedUnlocks = await EmployerResumeUnlock.countDocuments({
+      employer: employer._id,
+      plan: planId,
+      isDeleted: { $ne: true }
+    });
+
+    const unlockLimitExhausted = usedUnlocks >= unlockLimit;
+
+    return {
+      hasCandidateAccess: true,
+      unlockLimitExhausted,
+      isUnlocked,
+      employerId: employer._id,
+      planId,
+      unlockLimit,
+      usedUnlocks
+    };
   } catch (err) {
-    console.error(err);
-    return false;
+    console.error('checkEmployerPlanAccess Error:', err);
+    return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
   }
 };
 
-const getEmployerAllowResumeDownload = async (userId) => {
-  try {
-    const employer = await Employer.findOne({
-      $or: [{ userId }, { login: userId }],
-      isDeleted: { $ne: true }
-    }).populate('currentPlan');
-    const plan = employer?.currentPlan;
-    const planEndDate = employer?.planValidity || plan?.endDate || null;
-    const isPaidPlan = plan?.planType === 'Paid' || Number(plan?.cost || 0) > 0;
-    const isPlanActive = !planEndDate || new Date(planEndDate).getTime() >= Date.now();
+const getEmployerShowContactDetails = async (userId) => {
+  const access = await checkEmployerPlanAccess(userId);
+  return access.hasCandidateAccess;
+};
 
-    return Boolean(isPaidPlan && isPlanActive && plan?.allowResumeDownload === true && plan?.showContactDetails === true && getUnlockLimit(plan) > 0);
-  } catch (err) {
-    console.error(err);
-    return false;
-  }
+const getEmployerAllowResumeDownload = async (userId) => {
+  const access = await checkEmployerPlanAccess(userId);
+  return access.hasCandidateAccess;
 };
 
 const daysFromNow = (value) => {
@@ -357,17 +418,19 @@ const paginate = (items, pageValue, limitValue) => {
   };
 };
 
-const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload = true) => {
+const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload = true, hasCandidateAccess = true) => {
   const salary = parseSalaryRange(candidate.expectedSalary);
   const createdAt = candidate.createDate || candidate.createdAt;
   const isRecent = createdAt && (Date.now() - new Date(createdAt).getTime()) <= 7 * 24 * 60 * 60 * 1000;
   const updatedToday = candidate.updateDate && new Date(candidate.updateDate).toDateString() === new Date().toDateString();
 
+  const hiddenText = hasCandidateAccess ? 'Hidden (Unlock to View)' : 'Hidden (Upgrade Plan)';
+
   return {
     id: candidate._id,
     name: candidate.name,
-    email: showContacts ? (candidate.userId?.email || '') : 'Hidden (Upgrade Plan)',
-    phone: showContacts ? (candidate.phone || '') : 'Hidden (Upgrade Plan)',
+    email: showContacts ? (candidate.userId?.email || '') : hiddenText,
+    phone: showContacts ? (candidate.phone || '') : hiddenText,
     location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
     role: candidate.jobCategory?.categoryName || 'Candidate',
     experience: candidate.experience || 'Fresher',
@@ -541,9 +604,23 @@ exports.getEmployerCandidates = async (req, res) => {
       .populate('currentPlan', 'planName')
       .lean();
 
-    const showContacts = await getEmployerShowContactDetails(req.user._id);
-    const allowDownload = await getEmployerAllowResumeDownload(req.user._id);
-    let mapped = candidates.map((c, idx) => mapCandidate(c, idx, showContacts, allowDownload));
+    const access = await checkEmployerPlanAccess(req.user._id);
+    let unlockedCandidateIds = new Set();
+    if (access.hasCandidateAccess && access.employerId) {
+      const unlocks = await EmployerResumeUnlock.find({
+        employer: access.employerId,
+        plan: access.planId,
+        isDeleted: { $ne: true }
+      }).select('candidate');
+      unlockedCandidateIds = new Set(unlocks.map(u => String(u.candidate)));
+    }
+
+    let mapped = candidates.map((c, idx) => {
+      const isUnlocked = unlockedCandidateIds.has(String(c._id));
+      const showContacts = access.hasCandidateAccess && isUnlocked;
+      const allowDownload = access.hasCandidateAccess && isUnlocked;
+      return mapCandidate(c, idx, showContacts, allowDownload, access.hasCandidateAccess);
+    });
     const rawSearch = String(query.search || '').trim().toLowerCase();
     const employmentTypes = splitList(query.employmentTypes);
     const minSalary = nullableNumber(query.minSalary);
@@ -654,9 +731,31 @@ exports.getEmployerCandidateProfile = async (req, res) => {
       return res.status(403).json({ message: 'You are not allowed to view this candidate profile.' });
     }
 
-    const showContacts = await getEmployerShowContactDetails(userId);
-    const allowDownload = await getEmployerAllowResumeDownload(userId);
-    const mapped = mapCandidate(candidate, 0, showContacts, allowDownload);
+    const access = await checkEmployerPlanAccess(userId, candidate._id);
+
+    let showContacts = false;
+    let allowDownload = false;
+    let autoUnlocked = false;
+
+    if (access.hasCandidateAccess) {
+      if (access.isUnlocked) {
+        showContacts = true;
+        allowDownload = true;
+      } else if (!access.unlockLimitExhausted) {
+        // Automatically unlock!
+        await EmployerResumeUnlock.create(addAuditOnCreate(req, {
+          employer: access.employerId,
+          login: userId,
+          candidate: candidate._id,
+          plan: access.planId
+        }));
+        showContacts = true;
+        allowDownload = true;
+        autoUnlocked = true;
+      }
+    }
+
+    const mapped = mapCandidate(candidate, 0, showContacts, allowDownload, access.hasCandidateAccess);
     const skills = Array.isArray(candidate.skills) && candidate.skills.length
       ? candidate.skills
       : [candidate.jobCategory?.categoryName, candidate.jobType?.jobType, candidate.industryType?.industryType].filter(Boolean);
@@ -664,7 +763,10 @@ exports.getEmployerCandidateProfile = async (req, res) => {
 
     res.json({
       ...mapped,
-      phone: showContacts ? (candidate.phone || candidate.userId?.phone || '') : 'Hidden (Upgrade Plan)',
+      hasCandidateAccess: access.hasCandidateAccess,
+      unlockLimitExhausted: access.unlockLimitExhausted && !showContacts,
+      autoUnlocked,
+      phone: showContacts ? (candidate.phone || candidate.userId?.phone || '') : mapped.phone,
       designation: candidate.designation || mapped.role,
       bio: candidate.bio || `Experienced ${mapped.role} profile with ${mapped.experience} experience.`,
       expectedSalary: candidate.expectedSalary || 'Not specified',
