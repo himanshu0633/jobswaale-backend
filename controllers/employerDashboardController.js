@@ -1163,22 +1163,9 @@ exports.downloadCandidateResume = async (req, res) => {
     const userId = req.user._id;
     const candidateId = req.params.id;
 
-    const employer = await Employer.findOne({
-      $or: [{ userId }, { login: userId }],
-      isDeleted: { $ne: true }
-    }).populate('currentPlan');
+    const access = await checkEmployerPlanAccess(userId, candidateId);
 
-    if (!employer) {
-      return res.status(404).json({ message: 'Employer profile was not found.' });
-    }
-
-    const plan = employer.currentPlan;
-    const planEndDate = employer.planValidity || plan?.endDate || null;
-    const isPaidPlan = plan?.planType === 'Paid' || Number(plan?.cost || 0) > 0;
-    const isPlanActive = !planEndDate || new Date(planEndDate).getTime() >= Date.now();
-    const accessEnabled = Boolean(isPaidPlan && isPlanActive && plan?.allowResumeDownload === true && plan?.showContactDetails === true && getUnlockLimit(plan) > 0);
-
-    if (!accessEnabled) {
+    if (!access.hasCandidateAccess) {
       return res.status(403).json({ message: 'Resume downloads are not supported under your current plan.' });
     }
 
@@ -1187,33 +1174,18 @@ exports.downloadCandidateResume = async (req, res) => {
       return res.status(404).json({ message: 'Resume was not found for this candidate.' });
     }
 
-    const planId = plan?._id || null;
-    const existingUnlock = await EmployerResumeUnlock.findOne({
-      employer: employer._id,
-      candidate: candidate._id,
-      plan: planId,
-      isDeleted: { $ne: true }
-    });
-
-    if (!existingUnlock) {
-      const unlockLimit = getUnlockLimit(plan);
-      const usedUnlocks = await EmployerResumeUnlock.countDocuments({
-        employer: employer._id,
-        plan: planId,
-        isDeleted: { $ne: true }
-      });
-
-      if (usedUnlocks >= unlockLimit) {
+    if (!access.isUnlocked) {
+      if (access.unlockLimitExhausted) {
         return res.status(403).json({
-          message: `Your ${plan.planName} plan allows ${Number.isFinite(unlockLimit) ? unlockLimit : 'unlimited'} resume unlock${unlockLimit === 1 ? '' : 's'}. Please upgrade your plan to download more resumes.`
+          message: `Your plan's resume unlock limit is exhausted. Please upgrade your plan to download more resumes.`
         });
       }
 
       await EmployerResumeUnlock.create(addAuditOnCreate(req, {
-        employer: employer._id,
+        employer: access.employerId,
         login: userId,
         candidate: candidate._id,
-        plan: planId
+        plan: access.planId
       }));
     }
 
