@@ -1679,11 +1679,13 @@ exports.getEmployerJobDetails = async (req, res) => {
       } else if (logicalStatus === 'Offered' || logicalStatus === 'Hired') {
         selected += 1;
       } else if (
-        details.onHold || 
-        details.status === 'On Hold' || 
-        details.status === 'Scheduled' || 
-        details.status === 'Rescheduled' || 
-        logicalStatus === 'Interview'
+        logicalStatus === 'Interview' ||
+        (details.date && (
+          details.onHold || 
+          details.status === 'On Hold' || 
+          details.status === 'Scheduled' || 
+          details.status === 'Rescheduled'
+        ))
       ) {
         interviews += 1;
       } else if (logicalStatus === 'Shortlisted') {
