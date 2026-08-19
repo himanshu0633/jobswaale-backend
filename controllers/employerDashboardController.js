@@ -1021,9 +1021,17 @@ exports.getEmployerApplicantHistory = async (req, res) => {
       return acc;
     }, {});
 
+    const total = applicants.length;
+    const page = Math.max(1, parseInt(query.page) || 1);
+    const limit = Math.max(1, parseInt(query.limit) || 10);
+    const startIndex = (page - 1) * limit;
+    const totalPages = Math.ceil(total / limit);
+
+    const paginatedApplicants = applicants.slice(startIndex, startIndex + limit);
+
     res.json({
       stats: {
-        total: applicants.length,
+        total,
         applied: statusCounts.Applied || 0,
         shortlisted: statusCounts.Shortlisted || 0,
         interview: statusCounts.Interview || 0,
@@ -1033,7 +1041,13 @@ exports.getEmployerApplicantHistory = async (req, res) => {
       filters: {
         jobs: jobs.map(job => ({ id: job._id, title: job.jobTitle }))
       },
-      applicants
+      applicants: paginatedApplicants,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages
+      }
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
