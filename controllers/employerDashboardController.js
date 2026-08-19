@@ -1851,6 +1851,21 @@ exports.getEmployerDashboard = async (req, res) => {
     });
     const { jobsUsed, remainingCredits, utilization } = planUsage;
 
+    const unlockLimitRaw = plan?.unlockCount || '0';
+    const isUnlimitedUnlocks = String(unlockLimitRaw).toLowerCase() === 'unlimited';
+    const unlockLimit = isUnlimitedUnlocks ? Number.MAX_SAFE_INTEGER : Number(unlockLimitRaw) || 0;
+
+    const unlocksUsed = employer
+      ? await EmployerResumeUnlock.countDocuments({
+          employer: employer._id,
+          plan: plan?._id || null,
+          isDeleted: { $ne: true }
+        })
+      : 0;
+
+    const remainingUnlocks = isUnlimitedUnlocks
+      ? 'Unlimited'
+      : Math.max(0, unlockLimit - unlocksUsed);
     // Ensure applications are seeded
     await ensureApplicationsExist(userId);
 
@@ -1956,7 +1971,10 @@ exports.getEmployerDashboard = async (req, res) => {
         jobsUsed,
         jobLimit: planLimit,
         remainingCredits,
-        utilization
+        utilization,
+        unlockLimit: isUnlimitedUnlocks ? 'Unlimited' : unlockLimit,
+        unlocksUsed,
+        remainingUnlocks
       },
       actionCenter: {
         activeJobs: jobStats.active,
@@ -2379,6 +2397,23 @@ exports.getEmployerSubscription = async (req, res) => {
       billingHistory
     });
     const { jobsUsed, totalJobs, remainingCredits, utilization } = planUsage;
+
+    const unlockLimitRaw = effectivePlan?.unlockCount || '0';
+    const isUnlimitedUnlocks = String(unlockLimitRaw).toLowerCase() === 'unlimited';
+    const unlockLimit = isUnlimitedUnlocks ? Number.MAX_SAFE_INTEGER : Number(unlockLimitRaw) || 0;
+
+    const unlocksUsed = employer
+      ? await EmployerResumeUnlock.countDocuments({
+          employer: employer._id,
+          plan: effectivePlan?._id || null,
+          isDeleted: { $ne: true }
+        })
+      : 0;
+
+    const remainingUnlocks = isUnlimitedUnlocks
+      ? 'Unlimited'
+      : Math.max(0, unlockLimit - unlocksUsed);
+
     const autoMail = await getEmployerAutoMailSummary({ employer, plan: effectivePlan });
 
     res.json({
@@ -2397,7 +2432,10 @@ exports.getEmployerSubscription = async (req, res) => {
         teamMembersCount,
         teamMembersLimit: 10,
         daysRemaining,
-        autoMail
+        autoMail,
+        unlockLimit: isUnlimitedUnlocks ? 'Unlimited' : unlockLimit,
+        unlocksUsed,
+        remainingUnlocks
       },
       stats: {
         activeJobs: activeJobsCount,
