@@ -357,8 +357,12 @@ exports.getJobseekerDashboard = async (req, res) => {
 
     // Compute stats
     const jobsAppliedCount = await Application.countDocuments({ candidate: seeker._id });
+    const appliedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Applied' });
+    const reviewedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Reviewed' });
     const shortlistedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Shortlisted' });
     const interviewsCount = await Application.countDocuments({ candidate: seeker._id, status: 'Interview' });
+    const offeredCount = await Application.countDocuments({ candidate: seeker._id, status: 'Offered' });
+    const rejectedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Rejected' });
     
     // Recent activities (applications)
     const recentApps = await Application.find({ candidate: seeker._id })
@@ -444,8 +448,12 @@ exports.getJobseekerDashboard = async (req, res) => {
       },
       stats: {
         jobsApplied: { value: jobsAppliedCount, change: 'Lifetime Applications' },
+        applied: { value: appliedCount, change: 'Newly submitted' },
+        reviewed: { value: reviewedCount, change: 'Under review' },
         shortlisted: { value: shortlistedCount, change: 'Moving forward' },
         interviews: { value: interviewsCount, change: 'Scheduled sessions' },
+        offered: { value: offeredCount, change: 'Selected / Offered' },
+        rejected: { value: rejectedCount, change: 'Not selected' },
         profileViews: { value: 15 + Math.floor(Math.random() * 20), change: '+3 this week' } // realistic mock views
       },
       recentActivity,
