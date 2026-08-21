@@ -265,6 +265,98 @@ exports.deleteJob = async (req, res) => {
   }
 };
 
+exports.getJobApplicationHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ message: 'Job posting not found' });
+    }
+
+    const job = await Job.findOne({ _id: id, isDeleted: { $ne: true } })
+      .populate('jobCategory', 'categoryName')
+      .populate('jobType', 'jobType')
+      .populate('qualification', 'name')
+      .populate('login', 'email firstName lastName companyName')
+      .lean();
+
+    if (!job) {
+      return res.status(404).json({ message: 'Job posting not found' });
+    }
+
+    const applications = await Application.find({ job: job._id })
+      .populate({
+        path: 'candidate',
+        select: 'name phone city state experience qualification resume status userId',
+        populate: [
+          { path: 'qualification', select: 'name' },
+          { path: 'userId', select: 'email phone firstName lastName' }
+        ]
+      })
+      .sort({ appliedDate: -1, createDate: -1 })
+      .lean();
+
+    const applicants = applications.map((application) => {
+      const candidate = application.candidate;
+      const appliedDate = application.appliedDate || application.createDate;
+      return {
+        id: application._id,
+        applicationId: application._id,
+        candidateId: candidate?._id || null,
+        candidateName: candidate?.name || [candidate?.userId?.firstName, candidate?.userId?.lastName].filter(Boolean).join(' ') || 'Candidate',
+        candidateEmail: candidate?.userId?.email || '',
+        candidatePhone: candidate?.phone || candidate?.userId?.phone || '',
+        candidateLocation: [candidate?.city, candidate?.state].filter(Boolean).join(', '),
+        experience: candidate?.experience || '',
+        qualification: candidate?.qualification?.name || '',
+        resume: candidate?.resume || '',
+        candidateStatus: candidate?.status || '',
+        applicationStatus: application.status || 'Applied',
+        matchScore: application.matchScore || 0,
+        appliedDate,
+        appliedDisplayDate: appliedDate ? new Date(appliedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—',
+        shortlistedDate: application.shortlistedDate || null,
+        interviewDetails: application.interviewDetails || null,
+        selectionDetails: application.selectionDetails || null
+      };
+    });
+
+    res.json({
+      job: {
+        id: job._id,
+        title: job.jobTitle,
+        company: job.companyName,
+        category: job.jobCategory?.categoryName || 'General',
+        type: job.jobType?.jobType || job.workMode || 'N/A',
+        vacancies: job.vacancies || 0,
+        workMode: job.workMode || '',
+        experience: job.experience || '',
+        salary: job.salary || 'Negotiable',
+        location: [job.city, job.state].filter(Boolean).join(', '),
+        country: job.country || '',
+        contactPerson: job.contactPerson || '',
+        email: job.email || job.login?.email || '',
+        phone: job.phone || '',
+        status: job.status || '',
+        postedOn: job.postingDate || job.createDate || null,
+        expiry: job.jobExpiry || null,
+        description: job.description || ''
+      },
+      stats: {
+        total: applicants.length,
+        applied: applicants.filter(item => item.applicationStatus === 'Applied').length,
+        shortlisted: applicants.filter(item => item.applicationStatus === 'Shortlisted').length,
+        interview: applicants.filter(item => item.applicationStatus === 'Interview').length,
+        offered: applicants.filter(item => item.applicationStatus === 'Offered').length,
+        rejected: applicants.filter(item => item.applicationStatus === 'Rejected').length
+      },
+      applicants
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getJobById = async (req, res) => {
   try {
     const { id } = req.params;

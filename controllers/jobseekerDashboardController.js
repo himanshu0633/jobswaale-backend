@@ -803,6 +803,7 @@ exports.getJobseekerApplications = async (req, res) => {
           { path: 'jobCategory', select: 'categoryName' }
         ]
       })
+      .sort({ appliedDate: -1, createDate: -1 })
       .lean();
 
     const mapped = applications.map((app, index) => {

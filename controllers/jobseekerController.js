@@ -83,11 +83,13 @@ exports.getJobseekerApplicationHistory = async (req, res) => {
     const { id } = req.params;
 
     let jobseeker = await Jobseeker.findById(id)
+      .populate('qualification', 'name')
       .populate('userId', 'email phone firstName lastName')
       .lean();
 
     if (!jobseeker) {
       jobseeker = await Jobseeker.findOne({ userId: id })
+        .populate('qualification', 'name')
         .populate('userId', 'email phone firstName lastName')
         .lean();
     }
@@ -108,7 +110,12 @@ exports.getJobseekerApplicationHistory = async (req, res) => {
           id: user._id,
           name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email || 'Jobseeker',
           email: user.email || '',
-          phone: user.phone || ''
+          phone: user.phone || '',
+          location: '',
+          qualification: '',
+          experience: '',
+          status: user.status || '',
+          resume: ''
         },
         stats: {
           total: 0,
@@ -159,7 +166,12 @@ exports.getJobseekerApplicationHistory = async (req, res) => {
         id: jobseeker._id,
         name: jobseeker.name,
         email: jobseeker.userId?.email || '',
-        phone: jobseeker.phone || jobseeker.userId?.phone || ''
+        phone: jobseeker.phone || jobseeker.userId?.phone || '',
+        location: [jobseeker.city, jobseeker.state].filter(Boolean).join(', '),
+        qualification: jobseeker.qualification?.name || '',
+        experience: jobseeker.experience || '',
+        status: jobseeker.status || '',
+        resume: jobseeker.resume || ''
       },
       stats: {
         total: history.length,

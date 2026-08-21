@@ -2069,6 +2069,8 @@ exports.getEmployerProfile = async (req, res) => {
 
     const activeJobsCount = allJobs.filter(job => getJobDisplayStatus(job) === 'Active').length;
     const hiredCount = await Application.countDocuments({ job: { $in: jobIds }, status: 'Offered' });
+    const applicationsCount = await Application.countDocuments({ job: { $in: jobIds } });
+    const teamMembersCount = employer?.teamMembers?.length || 1;
 
     const plan = employer?.currentPlan || null;
     const defaultPlan = !plan && req.user.selectedPlan
@@ -2082,7 +2084,29 @@ exports.getEmployerProfile = async (req, res) => {
       plan: effectivePlan,
       allJobs
     });
-    const { jobsUsed, remainingCredits, utilization } = planUsage;
+    const { jobsUsed, totalJobs, remainingCredits, utilization } = planUsage;
+    const unlockLimitRaw = effectivePlan?.unlockCount || '0';
+    const isUnlimitedUnlocks = String(unlockLimitRaw).toLowerCase() === 'unlimited';
+    const unlockLimit = isUnlimitedUnlocks ? Number.MAX_SAFE_INTEGER : Number(unlockLimitRaw) || 0;
+    const unlocksUsed = employer
+      ? await EmployerResumeUnlock.countDocuments({
+          employer: employer._id,
+          plan: effectivePlan?._id || null,
+          isDeleted: { $ne: true }
+        })
+      : 0;
+    const remainingUnlocks = isUnlimitedUnlocks
+      ? 'Unlimited'
+      : Math.max(0, unlockLimit - unlocksUsed);
+
+    let daysRemaining = 0;
+    if (employer?.planValidity) {
+      const diffMs = new Date(employer.planValidity).getTime() - Date.now();
+      daysRemaining = Math.max(Math.ceil(diffMs / (1000 * 60 * 60 * 24)), 0);
+    } else if (effectivePlan?.endDate) {
+      const diffMs = new Date(effectivePlan.endDate).getTime() - Date.now();
+      daysRemaining = Math.max(Math.ceil(diffMs / (1000 * 60 * 60 * 24)), 0);
+    }
 
     const [industries, states, districts, cities, countries] = await Promise.all([
       IndustryType.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).lean(),
@@ -2099,8 +2123,8 @@ exports.getEmployerProfile = async (req, res) => {
       status: employer?.status || req.user.status || 'active',
       isVerified: employer?.isVerified === true,
       ...profileCompletion,
-      planName: plan?.planName || 'No Plan',
-      planBadge: plan?.badge || plan?.planName || 'No Plan',
+      planName: effectivePlan?.planName || 'No Plan',
+      planBadge: effectivePlan?.badge || effectivePlan?.planName || 'No Plan',
       planValidity: employer?.planValidity || null,
       logo: employer?.logo || '',
 
@@ -2145,13 +2169,22 @@ exports.getEmployerProfile = async (req, res) => {
 
       // Subscription
       subscription: {
-        planName: plan?.planName || 'No Plan',
+        planName: effectivePlan?.planName || 'No Plan',
         status: employer?.status === 'blacklist' ? 'Inactive' : 'Active',
-        validUntil: employer?.planValidity || plan?.endDate || null,
+        validUntil: employer?.planValidity || effectivePlan?.endDate || null,
         jobsUsed,
+        totalJobs,
         jobLimit: planLimit,
         remainingCredits,
-        utilization
+        utilization,
+        applicationsCount,
+        applicationsLimit: 500,
+        teamMembersCount,
+        teamMembersLimit: 10,
+        daysRemaining,
+        unlockLimit: isUnlimitedUnlocks ? 'Unlimited' : unlockLimit,
+        unlocksUsed,
+        remainingUnlocks
       },
 
       // Masters

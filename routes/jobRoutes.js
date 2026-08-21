@@ -5,6 +5,7 @@ const { auditMiddleware } = require('../middleware/audit');
 const {
   getJobs,
   getJobById,
+  getJobApplicationHistory,
   applyJob,
   createJob,
   updateJob,
@@ -23,6 +24,7 @@ router.get('/', getJobs);
 // Admin-only operations below
 router.use(protect, authorizeAdminPortal);
 
+router.get('/:id/applications', getJobApplicationHistory);
 router.post('/', auditMiddleware, createJob);
 router.put('/:id', auditMiddleware, updateJob);
 router.delete('/:id', deleteJob);

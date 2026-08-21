@@ -3,6 +3,7 @@ const Jobseeker = require('../models/Jobseeker');
 const Job = require('../models/Job');
 const Payment = require('../models/Payment');
 const User = require('../models/User');
+const Application = require('../models/Application');
 
 const formatDate = (value) => {
   if (!value) return '';
@@ -25,6 +26,31 @@ const getJobStatus = (job) => {
 const formatStatus = (status = '') => {
   const value = String(status || '').trim();
   return value ? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase() : 'Pending';
+};
+
+const getMonthKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+};
+
+const getMonthLabel = (date) => new Intl.DateTimeFormat('en-IN', {
+  month: 'short',
+  year: '2-digit'
+}).format(date);
+
+const getApplicationDateMatch = (monthsBack = 5) => {
+  const start = new Date();
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  start.setMonth(start.getMonth() - monthsBack);
+  return {
+    $or: [
+      { appliedDate: { $gte: start } },
+      { appliedDate: { $exists: false }, createDate: { $gte: start } },
+      { appliedDate: null, createDate: { $gte: start } }
+    ]
+  };
 };
 
 exports.getDashboardStats = async (req, res) => {
@@ -64,7 +90,9 @@ exports.getDashboardStats = async (req, res) => {
       activeJobseekersCount,
       activePublicEmployersCount,
       activePublicJobseekersCount,
-      revenueStats
+      revenueStats,
+      applicationsByMonth,
+      applicationsByRawStatus
     ] = await Promise.all([
       Employer.countDocuments({ isDeleted: { $ne: true } }),
       Jobseeker.countDocuments({ isDeleted: { $ne: true } }),
@@ -79,6 +107,35 @@ exports.getDashboardStats = async (req, res) => {
       Payment.aggregate([
         { $match: { isDeleted: { $ne: true }, paymentStatus: 'Success' } },
         { $group: { _id: null, total: { $sum: '$paidAmount' } } }
+      ]),
+      Application.aggregate([
+        { $match: getApplicationDateMatch(5) },
+        {
+          $group: {
+            _id: {
+              $dateToString: {
+                format: '%Y-%m',
+                date: { $ifNull: ['$appliedDate', '$createDate'] },
+                timezone: 'Asia/Kolkata'
+              }
+            },
+            value: { $sum: 1 }
+          }
+        },
+        { $sort: { _id: 1 } }
+      ]),
+      Application.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            hired: {
+              $sum: {
+                $cond: [{ $eq: ['$selectionDetails.offerStatus', 'Hired'] }, 1, 0]
+              }
+            }
+          }
+        }
       ])
     ]);
     
@@ -97,6 +154,36 @@ exports.getDashboardStats = async (req, res) => {
     ]);
 
     const totalRevenue = revenueStats[0]?.total || 0;
+    const monthlyApplicationCounts = new Map(
+      applicationsByMonth.map((item) => [item._id, item.value])
+    );
+    const applicationsOverview = Array.from({ length: 6 }, (_, index) => {
+      const monthDate = new Date();
+      monthDate.setDate(1);
+      monthDate.setHours(0, 0, 0, 0);
+      monthDate.setMonth(monthDate.getMonth() - (5 - index));
+      return {
+        label: getMonthLabel(monthDate),
+        value: monthlyApplicationCounts.get(getMonthKey(monthDate)) || 0
+      };
+    });
+    const applicationStatusCounts = applicationsByRawStatus.reduce((acc, item) => {
+      const status = item._id || 'Applied';
+      acc.total += item.count || 0;
+      if (status === 'Applied' || status === 'Reviewed') acc.applied += item.count || 0;
+      if (status === 'Shortlisted') acc.shortlisted += item.count || 0;
+      if (status === 'Interview') acc.interview += item.count || 0;
+      if (status === 'Rejected') acc.rejected += item.count || 0;
+      if (status === 'Offered') acc.hired += item.hired || item.count || 0;
+      return acc;
+    }, {
+      total: 0,
+      applied: 0,
+      shortlisted: 0,
+      interview: 0,
+      hired: 0,
+      rejected: 0
+    });
 
     res.json({
       employers: employersCount + publicEmployersCount,
@@ -107,15 +194,8 @@ exports.getDashboardStats = async (req, res) => {
       activeUsers: activeJobseekersCount + activePublicJobseekersCount,
       activeCompanies: activeEmployersCount + activePublicEmployersCount,
       revenue: totalRevenue,
-      applicationsOverview: [],
-      applicationsByStatus: {
-        total: 0,
-        applied: 0,
-        shortlisted: 0,
-        interview: 0,
-        hired: 0,
-        rejected: 0
-      },
+      applicationsOverview,
+      applicationsByStatus: applicationStatusCounts,
       recentCandidates: recentJobseekers.map((candidate, index) => {
         const job = recentJobs[index % Math.max(recentJobs.length, 1)];
         return {
