@@ -81,8 +81,8 @@ const ApplicationSchema = new mongoose.Schema({
     },
     offerStatus: {
       type: String,
-      enum: ['Offer Sent', 'Offer Accepted', 'Offer Declined', 'Hired'],
-      default: 'Offer Sent'
+      enum: ['Selected', 'Offer Sent', 'Offer Accepted', 'Offer Declined', 'Hired'],
+      default: 'Selected'
     },
     salaryOffered: {
       type: Number,

@@ -386,7 +386,11 @@ exports.getJobseekerDashboard = async (req, res) => {
         text = `Interview scheduled for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
       } else if (app.status === 'Offered') {
         type = 'accepted';
-        text = `You received a job offer for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+        if (app.selectionDetails?.offerStatus === 'Selected') {
+          text = `You were selected for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+        } else {
+          text = `You received a job offer for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+        }
       } else if (app.status === 'Rejected') {
         type = 'rejected';
         text = `Application for <strong>${app.job?.jobTitle || 'Open Position'}</strong> was not selected`;
@@ -825,7 +829,8 @@ exports.getJobseekerApplications = async (req, res) => {
         matchScore: app.matchScore || 0,
         appliedOn: new Date(appliedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
         appliedDate,
-        status: String(app.status || 'Applied').toLowerCase()
+        status: String(app.status || 'Applied').toLowerCase(),
+        selectionDetails: app.selectionDetails || null
       };
     }).filter(Boolean);
 

@@ -152,12 +152,22 @@ exports.getPublicEmployerDetail = async (req, res) => {
       .filter(Boolean)
       .map((item) => item);
 
+    const now = new Date();
     const jobs = await Job.find({
       isDeleted: { $ne: true },
       status: { $in: ['active', 'featured'] },
       $or: [
         { login: { $in: loginIds } },
         { companyName: employer.companyName }
+      ],
+      $and: [
+        {
+          $or: [
+            { jobExpiry: { $exists: false } },
+            { jobExpiry: null },
+            { jobExpiry: { $gt: now } }
+          ]
+        }
       ]
     })
       .populate('jobCategory')

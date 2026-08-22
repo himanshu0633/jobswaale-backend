@@ -29,6 +29,17 @@ exports.getJobs = async (req, res) => {
     const filter = { isDeleted: { $ne: true } };
     if (!isAdmin) {
       filter.status = { $in: ['active', 'featured'] };
+      if (!req.query.employer) {
+        const now = new Date();
+        filter.$and = filter.$and || [];
+        filter.$and.push({
+          $or: [
+            { jobExpiry: { $exists: false } },
+            { jobExpiry: null },
+            { jobExpiry: { $gt: now } }
+          ]
+        });
+      }
     }
     if (req.query.employer) {
       if (!mongoose.Types.ObjectId.isValid(req.query.employer)) {
@@ -422,7 +433,9 @@ exports.getJobById = async (req, res) => {
       skills: jobDoc.skills && jobDoc.skills.length > 0 ? jobDoc.skills : [],
       applicants: successfulApplicationsCount,
       applicationsCount: successfulApplicationsCount,
-      appliedCount: successfulApplicationsCount
+      appliedCount: successfulApplicationsCount,
+      jobExpiry: jobDoc.jobExpiry || null,
+      expiry: jobDoc.jobExpiry || null
     };
 
     const Employer = require('../models/Employer');

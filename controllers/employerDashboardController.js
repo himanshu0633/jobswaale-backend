@@ -870,8 +870,8 @@ exports.getEmployerApplications = async (req, res) => {
         rejectedFromStatus: app.rejectedFromStatus || (app.status === 'Rejected' ? app.previousStatus || 'Not available' : ''),
         rejectedDate: app.rejectedDate ? formatDisplayDate(app.rejectedDate) : '',
         initials: getInitials(candidate.name).toUpperCase(),
-        avatarTone: ['from-rose-200 to-amber-200', 'from-blue-200 to-red-200', 'from-pink-200 to-slate-300', 'from-yellow-200 to-orange-200', 'from-amber-200 to-emerald-200', 'from-sky-200 to-slate-200', 'from-purple-200 to-pink-200'][index % 7],
-        interviewDetails: app.interviewDetails || null
+        interviewDetails: app.interviewDetails || null,
+        selectionDetails: app.selectionDetails || null
       };
     }).filter(Boolean);
 
@@ -903,14 +903,19 @@ exports.getEmployerApplications = async (req, res) => {
       return matchesSearch && matchesJob && matchesExperience && matchesDate && matchesScore;
     });
 
-    const statusCounts = applicationsPreStatusFilter.reduce((acc, item) => ({ ...acc, [item.status]: (acc[item.status] || 0) + 1 }), {});
+    const statusCounts = applicationsPreStatusFilter.reduce((acc, item) => {
+      const itemStatus = (item.status === 'Interview' && item.interviewDetails?.onHold) ? 'OnHold' : item.status;
+      return { ...acc, [itemStatus]: (acc[itemStatus] || 0) + 1 };
+    }, {});
 
     const filteredApplications = applicationsPreStatusFilter.filter((application) => {
       let matchesStatus = true;
       if (query.status) {
-        matchesStatus = application.status === query.status;
+        const appStatus = (application.status === 'Interview' && application.interviewDetails?.onHold) ? 'OnHold' : application.status;
+        matchesStatus = appStatus === query.status;
       } else if (query.statusGroup === 'queue') {
-        matchesStatus = ['Applied', 'Reviewed'].includes(application.status);
+        const appStatus = (application.status === 'Interview' && application.interviewDetails?.onHold) ? 'OnHold' : application.status;
+        matchesStatus = ['Applied', 'Reviewed'].includes(appStatus);
       }
       return matchesStatus;
     });
@@ -925,6 +930,8 @@ exports.getEmployerApplications = async (req, res) => {
         reviewed: statusCounts.Reviewed || 0,
         shortlisted: statusCounts.Shortlisted || 0,
         interviews: statusCounts.Interview || 0,
+        onHold: statusCounts.OnHold || 0,
+        selected: statusCounts.Offered || statusCounts.Hired || 0,
         rejected: statusCounts.Rejected || 0
       },
       pipeline: {
@@ -932,7 +939,8 @@ exports.getEmployerApplications = async (req, res) => {
         reviewed: statusCounts.Reviewed || 0,
         shortlisted: statusCounts.Shortlisted || 0,
         interview: statusCounts.Interview || 0,
-        offered: statusCounts.Offered || 0,
+        onHold: statusCounts.OnHold || 0,
+        offered: statusCounts.Offered || statusCounts.Hired || 0,
         rejected: statusCounts.Rejected || 0
       },
       filters: {
@@ -1380,7 +1388,7 @@ exports.getEmployerSelected = async (req, res) => {
 
     if (!jobIds.length) {
       return res.json({
-        stats: { total: 0, offerSent: 0, offerAccepted: 0, hired: 0, offerDeclined: 0 },
+        stats: { total: 0, selected: 0, offerSent: 0, offerAccepted: 0, hired: 0, offerDeclined: 0 },
         filters: { jobTitles: [] },
         selected: [],
         pagination: { page: 1, limit: Number(query.limit) || 10, total: 0, totalPages: 1 }
@@ -1426,7 +1434,7 @@ exports.getEmployerSelected = async (req, res) => {
 
       const details = app.selectionDetails || {};
       const selectedDate = details.selectedDate || app.updateDate || app.appliedDate;
-      const offerStatus = details.offerStatus || 'Offer Sent';
+      const offerStatus = details.offerStatus || 'Selected';
       const salaryLpa = getSalaryLpa(app);
 
       return {
@@ -1453,12 +1461,13 @@ exports.getEmployerSelected = async (req, res) => {
     }).filter(Boolean);
 
     const stats = selectedRows.reduce((acc, item) => {
+      if (item.offerStatus === 'Selected') acc.selected += 1;
       if (item.offerStatus === 'Offer Sent') acc.offerSent += 1;
       if (item.offerStatus === 'Offer Accepted') acc.offerAccepted += 1;
       if (item.offerStatus === 'Hired') acc.hired += 1;
       if (item.offerStatus === 'Offer Declined') acc.offerDeclined += 1;
       return { ...acc, total: acc.total + 1 };
-    }, { total: 0, offerSent: 0, offerAccepted: 0, hired: 0, offerDeclined: 0 });
+    }, { total: 0, selected: 0, offerSent: 0, offerAccepted: 0, hired: 0, offerDeclined: 0 });
 
     const rawSearch = String(query.search || '').trim().toLowerCase();
     const minSalary = query.minSalary ? Number(query.minSalary) : null;
@@ -1665,6 +1674,7 @@ exports.getEmployerReports = async (req, res) => {
 exports.getEmployerJobDetails = async (req, res) => {
   try {
     const userId = req.user._id;
+    const allowDownload = await getEmployerAllowResumeDownload(userId);
     const employer = await Employer.findOne({
       $or: [{ userId }, { login: userId }],
       isDeleted: { $ne: true }
@@ -1693,48 +1703,56 @@ exports.getEmployerJobDetails = async (req, res) => {
     const dbApps = await Application.find({ job: job._id }).lean();
     
     let applications = dbApps.length;
+    let applied = 0;
     let reviewed = 0;
     let shortlisted = 0;
     let interviews = 0;
+    let onHold = 0;
     let selected = 0;
     let rejected = 0;
+    let matchScoreTotal = 0;
+    let matchScoreCount = 0;
 
     dbApps.forEach(app => {
       const details = app.interviewDetails || {};
       let logicalStatus = app.status || 'Applied';
+      if (logicalStatus === 'Interview' && details.onHold) {
+        logicalStatus = 'OnHold';
+      }
+      const matchScore = Number(app.matchScore);
+      if (Number.isFinite(matchScore)) {
+        matchScoreTotal += matchScore;
+        matchScoreCount += 1;
+      }
       
       if (logicalStatus === 'Rejected') {
         rejected += 1;
       } else if (logicalStatus === 'Offered' || logicalStatus === 'Hired') {
         selected += 1;
-      } else if (
-        logicalStatus === 'Interview' ||
-        (details.date && (
-          details.onHold || 
-          details.status === 'On Hold' || 
-          details.status === 'Scheduled' || 
-          details.status === 'Rescheduled'
-        ))
-      ) {
+      } else if (logicalStatus === 'Interview') {
         interviews += 1;
+      } else if (logicalStatus === 'OnHold') {
+        onHold += 1;
       } else if (logicalStatus === 'Shortlisted') {
         shortlisted += 1;
       } else if (logicalStatus === 'Reviewed') {
         reviewed += 1;
+      } else if (logicalStatus === 'Applied') {
+        applied += 1;
       }
     });
     
     const views = job.views || 0;
     const impressions = job.impressions || 0;
+    const averageMatchScore = matchScoreCount ? Math.round(matchScoreTotal / matchScoreCount) : 0;
 
     const latestApps = await Application.find({ job: job._id })
       .populate({
         path: 'candidate',
-        select: 'name phone userId city state preferredLocation experience',
+        select: 'name phone userId city state preferredLocation experience resume',
         populate: { path: 'userId', select: 'email phone firstName lastName' }
       })
       .sort({ appliedDate: -1, createDate: -1 })
-      .limit(5)
       .lean();
 
     res.json({
@@ -1802,13 +1820,16 @@ exports.getEmployerJobDetails = async (req, res) => {
         district: job.district || '',
         city: job.city || ''
       },
-            stats: {
+      stats: {
         applications,
+        applied,
         reviewed,
         shortlisted,
         interviews,
+        onHold,
         selected,
-        rejected
+        rejected,
+        averageMatchScore
       },
       recentApplicants: latestApps.map((app, index) => ({
         id: app._id,
@@ -1819,7 +1840,11 @@ exports.getEmployerJobDetails = async (req, res) => {
         experience: app.candidate?.experience || '',
         appliedAt: formatDate(app.appliedDate || app.createDate),
         matchScore: app.matchScore || 0,
-        status: app.status
+        status: app.status,
+        interviewDetails: app.interviewDetails || null,
+        selectionDetails: app.selectionDetails || null,
+        hasResume: Boolean(app.candidate?.resume),
+        allowResumeDownload: allowDownload
       }))
     });
   } catch (error) {
@@ -1890,36 +1915,54 @@ exports.getEmployerDashboard = async (req, res) => {
       appliedCount,
       shortlistedCount,
       selectedCount,
+      offeredCount,
       interviewCount,
       reviewCount,
-      rejectedCount
+      rejectedCount,
+      onHoldCount
     ] = await Promise.all([
       Application.countDocuments({ job: { $in: jobIds } }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Applied' }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Shortlisted' }),
-      Application.countDocuments({ job: { $in: jobIds }, status: 'Offered' }),
-      Application.countDocuments({ job: { $in: jobIds }, status: 'Interview' }),
+      Application.countDocuments({ job: { $in: jobIds }, status: 'Offered', 'selectionDetails.offerStatus': 'Selected' }),
+      Application.countDocuments({ job: { $in: jobIds }, status: 'Offered', 'selectionDetails.offerStatus': { $ne: 'Selected' } }),
+      Application.countDocuments({ job: { $in: jobIds }, status: 'Interview', 'interviewDetails.onHold': { $ne: true } }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Reviewed' }),
-      Application.countDocuments({ job: { $in: jobIds }, status: 'Rejected' })
+      Application.countDocuments({ job: { $in: jobIds }, status: 'Rejected' }),
+      Application.countDocuments({ job: { $in: jobIds }, status: 'Interview', 'interviewDetails.onHold': true })
     ]);
 
     // Group application counts by job and status
     const appCounts = await Application.aggregate([
       { $match: { job: { $in: allJobs.map(j => j._id) } } },
-      { $group: { _id: { job: "$job", status: "$status" }, count: { $sum: 1 } } }
+      { $group: { _id: { job: "$job", status: "$status", offerStatus: "$selectionDetails.offerStatus", onHold: "$interviewDetails.onHold" }, count: { $sum: 1 } } }
     ]);
 
     const countMap = {};
     appCounts.forEach(item => {
       const jobId = String(item._id.job);
       const status = item._id.status;
+      const offerStatus = item._id.offerStatus;
+      const onHold = item._id.onHold === true;
       if (!countMap[jobId]) {
-        countMap[jobId] = { total: 0, shortlisted: 0, interview: 0, selected: 0 };
+        countMap[jobId] = { total: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0 };
       }
       countMap[jobId].total += item.count;
       if (status === 'Shortlisted') countMap[jobId].shortlisted += item.count;
-      if (status === 'Interview') countMap[jobId].interview += item.count;
-      if (status === 'Offered') countMap[jobId].selected += item.count;
+      if (status === 'Interview') {
+        if (onHold) {
+          countMap[jobId].onHold += item.count;
+        } else {
+          countMap[jobId].interview += item.count;
+        }
+      }
+      if (status === 'Offered') {
+        if (offerStatus === 'Selected') {
+          countMap[jobId].selected += item.count;
+        } else {
+          countMap[jobId].offered += item.count;
+        }
+      }
     });
 
     const latestApps = await Application.find({ job: { $in: jobIds } })
@@ -1952,9 +1995,9 @@ exports.getEmployerDashboard = async (req, res) => {
       closed: allJobs.filter(job => ['Closed', 'Paused'].includes(getJobDisplayStatus(job))).length
     };
     const activeJobRows = allJobs
-      .filter(job => getJobDisplayStatus(job) === 'Active')
+      .filter(job => ['Active', 'Expired'].includes(getJobDisplayStatus(job)))
       .map(job => {
-        const jCounts = countMap[String(job._id)] || { total: 0, shortlisted: 0, interview: 0, selected: 0 };
+        const jCounts = countMap[String(job._id)] || { total: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0 };
         return {
           id: job._id,
           title: job.jobTitle,
@@ -1964,7 +2007,9 @@ exports.getEmployerDashboard = async (req, res) => {
           applications: jCounts.total,
           shortlisted: jCounts.shortlisted,
           interviews: jCounts.interview,
+          onHold: jCounts.onHold,
           selected: jCounts.selected,
+          offered: jCounts.offered,
           postedAt: formatDate(job.createDate || job.postingDate)
         };
       });
@@ -2003,16 +2048,22 @@ exports.getEmployerDashboard = async (req, res) => {
         reviewed: reviewCount,
         shortlisted: shortlistedCount,
         interviews: interviewCount,
+        onHold: onHoldCount,
         selected: selectedCount,
-        rejected: rejectedCount
+        offered: offeredCount,
+        rejected: rejectedCount,
+        expired: expiredJobs.length
       },
       pipeline: {
+        active: jobStats.active,
         applied: appliedCount,
-        underReview: reviewCount,
         shortlisted: shortlistedCount,
         interview: interviewCount,
+        onHold: onHoldCount,
         selected: selectedCount,
-        notSelected: rejectedCount
+        offered: offeredCount,
+        rejected: rejectedCount,
+        expired: expiredJobs.length
       },
       activeJobs: activeJobRows,
       jobPerformance: activeJobRows.slice(0, 7).map((job, index) => ({
@@ -3077,14 +3128,20 @@ exports.updateApplicationStatus = async (req, res) => {
       application.shortlistedDate = new Date();
     }
     if (status === 'Offered') {
+      const isNewSelection = previousStatus !== 'Offered';
       const currentDetails = application.selectionDetails || {};
       application.selectionDetails = {
         ...currentDetails,
-        selectedDate: currentDetails.selectedDate || new Date(),
-        interviewScore: currentDetails.interviewScore ?? application.matchScore ?? null,
-        offerStatus: currentDetails.offerStatus || 'Offer Sent',
-        salaryOffered: currentDetails.salaryOffered ?? application.job?.maxSalary ?? application.job?.minSalary ?? null,
-        offerSentAt: currentDetails.offerSentAt || new Date()
+        selectedDate: isNewSelection ? new Date() : (currentDetails.selectedDate || new Date()),
+        interviewScore: isNewSelection ? (application.matchScore ?? null) : (currentDetails.interviewScore ?? application.matchScore ?? null),
+        offerStatus: isNewSelection ? 'Selected' : (currentDetails.offerStatus || 'Selected'),
+        salaryOffered: isNewSelection ? (application.job?.maxSalary ?? application.job?.minSalary ?? null) : (currentDetails.salaryOffered ?? application.job?.maxSalary ?? application.job?.minSalary ?? null),
+        offerSentAt: isNewSelection ? null : currentDetails.offerSentAt,
+        joiningDate: isNewSelection ? null : currentDetails.joiningDate,
+        employmentType: isNewSelection ? '' : (currentDetails.employmentType || ''),
+        notes: isNewSelection ? '' : (currentDetails.notes || ''),
+        offerRespondedAt: isNewSelection ? null : currentDetails.offerRespondedAt,
+        hiredAt: isNewSelection ? null : currentDetails.hiredAt
       };
     }
     await application.save();
@@ -3107,7 +3164,7 @@ exports.updateApplicationStatus = async (req, res) => {
             seekerName: fullApp.candidate.name,
             jobTitle: fullApp.job?.jobTitle || 'Job Position',
             companyName: fullApp.job?.companyName || 'Employer',
-            status: fullApp.status,
+            status: fullApp.status === 'Offered' ? (fullApp.selectionDetails?.offerStatus || 'Selected') : fullApp.status,
             recipientId: candidateUserId
           });
         }
@@ -3134,7 +3191,7 @@ exports.updateSelectedOffer = async (req, res) => {
       notes
     } = req.body;
 
-    if (!['Offer Sent', 'Offer Accepted', 'Offer Declined', 'Hired'].includes(offerStatus)) {
+    if (!['Selected', 'Offer Sent', 'Offer Accepted', 'Offer Declined', 'Hired'].includes(offerStatus)) {
       return res.status(400).json({ message: 'Invalid offer status.' });
     }
 
@@ -3158,7 +3215,7 @@ exports.updateSelectedOffer = async (req, res) => {
       joiningDate: joiningDate ? new Date(joiningDate) : currentDetails.joiningDate,
       employmentType: employmentType ?? currentDetails.employmentType ?? '',
       notes: notes ?? currentDetails.notes ?? '',
-      offerSentAt: currentDetails.offerSentAt || new Date(),
+      offerSentAt: offerStatus === 'Offer Sent' ? (currentDetails.offerSentAt || new Date()) : currentDetails.offerSentAt,
       offerRespondedAt: ['Offer Accepted', 'Offer Declined'].includes(offerStatus) ? new Date() : currentDetails.offerRespondedAt,
       hiredAt: offerStatus === 'Hired' ? new Date() : currentDetails.hiredAt
     };
@@ -3183,7 +3240,7 @@ exports.updateSelectedOffer = async (req, res) => {
             seekerName: fullApp.candidate.name,
             jobTitle: fullApp.job?.jobTitle || 'Job Position',
             companyName: fullApp.job?.companyName || 'Employer',
-            status: `${fullApp.status} (${offerStatus})`,
+            status: offerStatus,
             recipientId: candidateUserId
           });
         }
