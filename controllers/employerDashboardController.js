@@ -1515,7 +1515,21 @@ exports.getEmployerReports = async (req, res) => {
     const toDate = query.to ? new Date(query.to) : now;
     toDate.setHours(23, 59, 59, 999);
 
-    const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
+    const employer = await Employer.findOne({
+      $or: [{ userId }, { login: userId }],
+      isDeleted: { $ne: true }
+    }).lean();
+
+    const loginIds = [userId, employer?.userId, employer?.login].filter(Boolean);
+    const companyName = employer?.companyName || req.user.companyName;
+    const ownershipFilter = {
+      $or: [
+        { login: { $in: loginIds } },
+        ...(companyName ? [{ companyName }] : [])
+      ]
+    };
+
+    const jobs = await Job.find({ ...ownershipFilter, isDeleted: { $ne: true } })
       .select('_id jobTitle jobType postingDate jobExpiry status publishStatus')
       .populate('jobType', 'jobType')
       .lean();
@@ -1535,7 +1549,15 @@ exports.getEmployerReports = async (req, res) => {
 
     const apps = await Application.find({
       job: { $in: jobIds },
-      appliedDate: { $gte: fromDate, $lte: toDate }
+      $or: [
+        { appliedDate: { $gte: fromDate, $lte: toDate } },
+        {
+          $and: [
+            { $or: [{ appliedDate: { $exists: false } }, { appliedDate: null }] },
+            { createDate: { $gte: fromDate, $lte: toDate } }
+          ]
+        }
+      ]
     })
       .populate({
         path: 'candidate',
