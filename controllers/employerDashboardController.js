@@ -1687,6 +1687,16 @@ exports.getEmployerReports = async (req, res) => {
         conversionRate: job.applications ? Number(((job.hired / job.applications) * 100).toFixed(1)) : 0
       }));
 
+    const pipeline = {
+      applied: apps.filter(app => app.status === 'Applied').length,
+      shortlisted: statusCounts.Shortlisted || 0,
+      interview: apps.filter(app => app.status === 'Interview' && app.interviewDetails?.onHold !== true).length,
+      onHold: apps.filter(app => app.status === 'Interview' && app.interviewDetails?.onHold === true).length,
+      selected: apps.filter(app => app.status === 'Offered' && app.selectionDetails?.offerStatus === 'Selected').length,
+      offered: apps.filter(app => app.status === 'Offered' && app.selectionDetails?.offerStatus !== 'Selected').length,
+      rejected: statusCounts.Rejected || 0
+    };
+
     res.json({
       range: {
         from: formatDate(fromDate),
@@ -1698,7 +1708,8 @@ exports.getEmployerReports = async (req, res) => {
       sources,
       funnel,
       recentActivity,
-      topJobs
+      topJobs,
+      pipeline
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
