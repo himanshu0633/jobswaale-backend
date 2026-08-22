@@ -1577,7 +1577,7 @@ exports.getEmployerReports = async (req, res) => {
       });
     }
 
-    const emptyMonth = () => ({ applied: 0, reviewed: 0, shortlisted: 0, interview: 0, selected: 0, rejected: 0 });
+    const emptyMonth = () => ({ applied: 0, reviewed: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, rejected: 0 });
     const monthlyMap = Object.fromEntries(monthKeys.map(item => [item.key, emptyMonth()]));
     const sourceMap = {};
     const jobMap = Object.fromEntries(jobs.map(job => [String(job._id), {
@@ -1595,11 +1595,23 @@ exports.getEmployerReports = async (req, res) => {
       const month = monthlyMap[monthKey];
       const status = app.status;
       if (month) {
-        month.applied += 1;
+        if (status === 'Applied') month.applied += 1;
         if (status === 'Reviewed') month.reviewed += 1;
         if (status === 'Shortlisted') month.shortlisted += 1;
-        if (status === 'Interview') month.interview += 1;
-        if (status === 'Offered') month.selected += 1;
+        if (status === 'Interview') {
+          if (app.interviewDetails?.onHold === true) {
+            month.onHold += 1;
+          } else {
+            month.interview += 1;
+          }
+        }
+        if (status === 'Offered') {
+          if (app.selectionDetails?.offerStatus === 'Selected') {
+            month.selected += 1;
+          } else {
+            month.offered += 1;
+          }
+        }
         if (status === 'Rejected') month.rejected += 1;
       }
 
