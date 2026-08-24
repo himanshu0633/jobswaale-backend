@@ -90,11 +90,30 @@ exports.createJob = async (req, res) => {
       jobType, 
       vacancies, 
       workMode, 
+      jobLocations,
       description, 
+      jobSummary,
+      detailedDescription,
+      responsibilities,
       qualification, 
       experience, 
+      requiredExperience,
       salary, 
+      minSalary,
+      maxSalary,
+      salaryUnit,
       salaryNegotiable, 
+      noticePeriod,
+      joiningDate,
+      shiftTiming,
+      jobExpiry,
+      benefits,
+      aboutCompany,
+      skills,
+      languages,
+      candidateLocationPreference,
+      screeningQuestions,
+      publishStatus,
       country, 
       state, 
       district, 
@@ -110,7 +129,7 @@ exports.createJob = async (req, res) => {
       blacklistReason 
     } = req.body;
 
-    if (!jobTitle || !jobCategory || !jobType || !vacancies || !description || !experience || !companyName || !email || !phone) {
+    if (!jobTitle || !jobCategory || !jobType || !vacancies || !description || !(experience || requiredExperience) || !companyName || !email || !phone) {
       return res.status(400).json({ message: 'jobTitle, jobCategory, jobType, vacancies, description, experience, companyName, email, and phone are required' });
     }
 
@@ -120,11 +139,30 @@ exports.createJob = async (req, res) => {
       jobType,
       vacancies,
       workMode,
+      jobLocations: Array.isArray(jobLocations) ? jobLocations : [],
       description,
+      jobSummary: jobSummary || '',
+      detailedDescription: detailedDescription || description || '',
+      responsibilities: responsibilities || '',
       qualification: qualification || null,
-      experience,
+      experience: experience || requiredExperience,
+      requiredExperience: requiredExperience || experience || '',
       salary,
+      minSalary: minSalary ?? null,
+      maxSalary: maxSalary ?? null,
+      salaryUnit: salaryUnit || '',
       salaryNegotiable: salaryNegotiable || false,
+      noticePeriod: noticePeriod || '',
+      joiningDate: joiningDate || null,
+      shiftTiming: shiftTiming || '',
+      jobExpiry: jobExpiry || null,
+      benefits: benefits || '',
+      aboutCompany: aboutCompany || '',
+      skills: Array.isArray(skills) ? skills : [],
+      languages: Array.isArray(languages) ? languages : [],
+      candidateLocationPreference: candidateLocationPreference || '',
+      screeningQuestions: screeningQuestions || '',
+      publishStatus: publishStatus || 'publish',
       country,
       state,
       district,
@@ -185,11 +223,30 @@ exports.updateJob = async (req, res) => {
       jobType, 
       vacancies, 
       workMode, 
+      jobLocations,
       description, 
+      jobSummary,
+      detailedDescription,
+      responsibilities,
       qualification, 
       experience, 
+      requiredExperience,
       salary, 
+      minSalary,
+      maxSalary,
+      salaryUnit,
       salaryNegotiable, 
+      noticePeriod,
+      joiningDate,
+      shiftTiming,
+      jobExpiry,
+      benefits,
+      aboutCompany,
+      skills,
+      languages,
+      candidateLocationPreference,
+      screeningQuestions,
+      publishStatus,
       country, 
       state, 
       district, 
@@ -218,11 +275,30 @@ exports.updateJob = async (req, res) => {
         jobType,
         vacancies,
         workMode,
+        jobLocations: Array.isArray(jobLocations) ? jobLocations : [],
         description,
+        jobSummary: jobSummary || '',
+        detailedDescription: detailedDescription || description || '',
+        responsibilities: responsibilities || '',
         qualification: qualification || null,
-        experience,
+        experience: experience || requiredExperience,
+        requiredExperience: requiredExperience || experience || '',
         salary,
+        minSalary: minSalary ?? null,
+        maxSalary: maxSalary ?? null,
+        salaryUnit: salaryUnit || '',
         salaryNegotiable: salaryNegotiable || false,
+        noticePeriod: noticePeriod || '',
+        joiningDate: joiningDate || null,
+        shiftTiming: shiftTiming || '',
+        jobExpiry: jobExpiry || null,
+        benefits: benefits || '',
+        aboutCompany: aboutCompany || '',
+        skills: Array.isArray(skills) ? skills : [],
+        languages: Array.isArray(languages) ? languages : [],
+        candidateLocationPreference: candidateLocationPreference || '',
+        screeningQuestions: screeningQuestions || '',
+        publishStatus: publishStatus || job.publishStatus || 'publish',
         country,
         state,
         district,
@@ -389,6 +465,25 @@ exports.getJobById = async (req, res) => {
 
     if (!jobDoc) {
       return res.status(404).json({ message: 'Job not found' });
+    }
+
+    if (req.query.raw === '1') {
+      let isAdmin = false;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const User = require('../models/User');
+          const token = authHeader.split(' ')[1];
+          const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
+          const user = await User.findById(decoded.id).select('role').lean();
+          isAdmin = ['Admin', 'SuperAdmin'].includes(user?.role);
+        } catch {
+          isAdmin = false;
+        }
+      }
+      if (isAdmin) {
+        return res.json({ job: jobDoc });
+      }
     }
 
     const descParas = typeof jobDoc.description === 'string'

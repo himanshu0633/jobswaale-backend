@@ -23,8 +23,12 @@ router.get('/verify-admin', protect, authorizeAdminPortal, (req, res) => {
       lastName: req.user.lastName,
       email: req.user.email,
       role: req.user.role,
+      roleRef: req.user.roleRef?._id || null,
       roleName: req.user.roleRef?.name || req.user.role,
-      accountType: req.user.accountType
+      accountType: req.user.accountType,
+      permissions: req.user.roleRef
+        ? (req.user.roleRef.permissions || [])
+        : (req.user.role === 'Admin' ? require('../utils/permissions').allPermissions : [])
     }
   });
 });

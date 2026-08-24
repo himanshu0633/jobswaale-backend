@@ -1,5 +1,5 @@
-const { getSettings, saveSettings, getPublicSettings } = require('../utils/settings');
-const { createTransportFromSettings } = require('../utils/mail');
+const { getSettings, saveSettings, getPublicSettings, normalizeSettings } = require('../utils/settings');
+const { createTransportFromSettings, formatMailError, sendMailWithRetry } = require('../utils/mail');
 
 exports.getSettings = async (req, res) => {
   try {
@@ -30,14 +30,18 @@ exports.updateSettings = async (req, res) => {
 
 exports.sendTestEmail = async (req, res) => {
   try {
-    const settings = await getSettings();
+    const savedSettings = await getSettings();
+    const settings = normalizeSettings({
+      ...savedSettings,
+      ...(req.body?.settings || req.body || {})
+    });
     const to = req.body?.to || settings.siteEmail || settings.mailFromEmail;
     if (!to) {
       return res.status(400).json({ message: 'Please set a support email or from email first.' });
     }
 
     const transporter = createTransportFromSettings(settings);
-    await transporter.sendMail({
+    await sendMailWithRetry(transporter, {
       from: `${settings.mailFromName || settings.siteName} <${settings.mailFromEmail || settings.siteEmail}>`,
       to,
       subject: `${settings.siteName} test email`,
@@ -49,6 +53,6 @@ exports.sendTestEmail = async (req, res) => {
     if (error.message === 'SMTP settings are not configured') {
       return res.status(400).json({ message: error.message });
     }
-    res.status(400).json({ message: error.message });
+    res.status(400).json({ message: formatMailError(error) });
   }
 };

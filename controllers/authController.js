@@ -322,9 +322,9 @@ exports.login = async (req, res) => {
     user.lockUntil = null;
     await user.save();
 
-    const rolePermissions = user.role === 'Admin'
-      ? allPermissions
-      : (user.roleRef?.permissions || []);
+    const rolePermissions = user.roleRef
+      ? (user.roleRef.permissions || [])
+      : (user.role === 'Admin' ? allPermissions : []);
 
     res.json({
       _id: user._id,

@@ -1511,9 +1511,20 @@ exports.getEmployerReports = async (req, res) => {
     const query = req.query || {};
     const now = new Date();
     const defaultFrom = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-    const fromDate = query.from ? new Date(query.from) : defaultFrom;
-    const toDate = query.to ? new Date(query.to) : now;
+    const requestedFrom = query.from ? new Date(query.from) : defaultFrom;
+    const requestedTo = query.to ? new Date(query.to) : now;
+    const fromDate = Number.isNaN(requestedFrom.getTime()) ? defaultFrom : requestedFrom;
+    const toDate = Number.isNaN(requestedTo.getTime()) ? now : requestedTo;
+    fromDate.setHours(0, 0, 0, 0);
     toDate.setHours(23, 59, 59, 999);
+    if (fromDate > toDate) {
+      const originalFrom = new Date(fromDate);
+      const originalTo = new Date(toDate);
+      fromDate.setTime(originalTo.getTime());
+      fromDate.setHours(0, 0, 0, 0);
+      toDate.setTime(originalFrom.getTime());
+      toDate.setHours(23, 59, 59, 999);
+    }
 
     const employer = await Employer.findOne({
       $or: [{ userId }, { login: userId }],
@@ -1533,7 +1544,12 @@ exports.getEmployerReports = async (req, res) => {
       .select('_id jobTitle jobType postingDate jobExpiry status publishStatus')
       .populate('jobType', 'jobType')
       .lean();
-    const jobIds = jobs.map(job => job._id);
+    const selectedJobId = String(query.jobId || 'all');
+    const selectedJobs = selectedJobId !== 'all'
+      ? jobs.filter(job => String(job._id) === selectedJobId)
+      : jobs;
+    const jobIds = selectedJobs.map(job => job._id);
+    const statusFilter = String(query.status || 'all');
 
     if (!jobIds.length) {
       return res.json({
@@ -1543,44 +1559,132 @@ exports.getEmployerReports = async (req, res) => {
         sources: [],
         funnel: [],
         recentActivity: [],
-        topJobs: []
+        topJobs: [],
+        pipeline: { applied: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, rejected: 0 },
+        comparison: {},
+        filters: {
+          jobs: jobs.map(job => ({ id: job._id, title: job.jobTitle })),
+          statuses: []
+        },
+        history: []
       });
     }
 
-    const apps = await Application.find({
+    await ensureApplicationsExist(userId);
+
+    const dateFieldFilter = (start, end) => ({
       job: { $in: jobIds },
       $or: [
-        { appliedDate: { $gte: fromDate, $lte: toDate } },
+        { appliedDate: { $gte: start, $lte: end } },
         {
           $and: [
             { $or: [{ appliedDate: { $exists: false } }, { appliedDate: null }] },
-            { createDate: { $gte: fromDate, $lte: toDate } }
+            { createDate: { $gte: start, $lte: end } }
           ]
         }
       ]
-    })
-      .populate({
-        path: 'candidate',
-        populate: { path: 'userId', select: 'email' }
-      })
-      .populate('job', 'jobTitle jobType')
-      .lean();
+    });
+
+    const rangeDuration = toDate.getTime() - fromDate.getTime() + 1;
+    const previousToDate = new Date(fromDate.getTime() - 1);
+    const previousFromDate = new Date(previousToDate.getTime() - rangeDuration + 1);
+    previousFromDate.setHours(0, 0, 0, 0);
+    previousToDate.setHours(23, 59, 59, 999);
+
+    const [apps, previousApps, allApps] = await Promise.all([
+      Application.find(dateFieldFilter(fromDate, toDate))
+        .populate({
+          path: 'candidate',
+          populate: { path: 'userId', select: 'email' }
+        })
+        .populate('job', 'jobTitle jobType')
+        .lean(),
+      Application.find(dateFieldFilter(previousFromDate, previousToDate)).lean(),
+      Application.find({ job: { $in: jobIds } }).lean()
+    ]);
 
     const sourceLabel = (app) => app.source || app.candidate?.source || app.candidate?.registrationSource || app.candidate?.leadSource || 'Other';
-    const monthFormatter = new Intl.DateTimeFormat('en-IN', { month: 'short' });
-    const monthKeys = [];
-    for (let index = 5; index >= 0; index -= 1) {
-      const date = new Date(toDate.getFullYear(), toDate.getMonth() - index, 1);
-      monthKeys.push({
-        key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
-        label: monthFormatter.format(date)
+    const getLogicalStage = (app) => {
+      if (app.status === 'Interview' && app.interviewDetails?.onHold === true) return 'onHold';
+      if (app.status === 'Interview') return 'interview';
+      if (app.status === 'Offered' && app.selectionDetails?.offerStatus === 'Selected') return 'selected';
+      if (app.status === 'Offered') return 'offered';
+      if (app.status === 'Applied') return 'applied';
+      if (app.status === 'Reviewed') return 'reviewed';
+      if (app.status === 'Shortlisted') return 'shortlisted';
+      if (app.status === 'Rejected') return 'rejected';
+      return 'applied';
+    };
+    const stageLabels = {
+      applied: 'Applied',
+      reviewed: 'Reviewed',
+      shortlisted: 'Shortlisted',
+      interview: 'Interview',
+      onHold: 'On Hold',
+      selected: 'Selected',
+      offered: 'Offered',
+      rejected: 'Rejected'
+    };
+    const statusOptions = [
+      { key: 'applied', label: 'Applied' },
+      { key: 'reviewed', label: 'Reviewed' },
+      { key: 'shortlisted', label: 'Shortlisted' },
+      { key: 'interview', label: 'Interview' },
+      { key: 'onHold', label: 'On Hold' },
+      { key: 'selected', label: 'Selected' },
+      { key: 'offered', label: 'Offered' },
+      { key: 'rejected', label: 'Rejected' }
+    ];
+    const matchesStatus = (app) => statusFilter === 'all' || getLogicalStage(app) === statusFilter;
+    const filteredApps = apps.filter(matchesStatus);
+    const filteredPreviousApps = previousApps.filter(matchesStatus);
+    const filteredAllApps = allApps.filter(matchesStatus);
+
+    const summarizeApps = (items) => {
+      const pipeline = { applied: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, rejected: 0 };
+      let reviewed = 0;
+      items.forEach((app) => {
+        const stage = getLogicalStage(app);
+        if (stage === 'reviewed') reviewed += 1;
+        if (pipeline[stage] !== undefined) pipeline[stage] += 1;
       });
+      const rejected = pipeline.rejected;
+      const totalApplications = items.length;
+      const hires = items.filter(app => app.status === 'Offered' && app.selectionDetails?.offerStatus === 'Hired').length;
+      return {
+        stats: {
+          totalApplications,
+          shortlisted: pipeline.shortlisted,
+          interviews: pipeline.interview,
+          offersMade: pipeline.offered,
+          hires,
+          rejectionRate: totalApplications ? Math.round((rejected / totalApplications) * 100) : 0
+        },
+        pipeline,
+        reviewed
+      };
+    };
+
+    const currentSummary = summarizeApps(filteredApps);
+    const previousSummary = summarizeApps(filteredPreviousApps);
+    const allTimeSummary = summarizeApps(filteredAllApps);
+
+    const monthFormatter = new Intl.DateTimeFormat('en-IN', { month: 'short', year: '2-digit' });
+    const monthKeys = [];
+    const cursor = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1);
+    const lastMonth = new Date(toDate.getFullYear(), toDate.getMonth(), 1);
+    while (cursor <= lastMonth) {
+      monthKeys.push({
+        key: `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`,
+        label: monthFormatter.format(cursor)
+      });
+      cursor.setMonth(cursor.getMonth() + 1);
     }
 
     const emptyMonth = () => ({ applied: 0, reviewed: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, rejected: 0 });
     const monthlyMap = Object.fromEntries(monthKeys.map(item => [item.key, emptyMonth()]));
     const sourceMap = {};
-    const jobMap = Object.fromEntries(jobs.map(job => [String(job._id), {
+    const jobMap = Object.fromEntries(selectedJobs.map(job => [String(job._id), {
       id: job._id,
       title: job.jobTitle,
       applications: 0,
@@ -1589,31 +1693,12 @@ exports.getEmployerReports = async (req, res) => {
       hired: 0
     }]));
 
-    apps.forEach((app) => {
+    filteredApps.forEach((app) => {
       const date = new Date(app.appliedDate || app.createDate || now);
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       const month = monthlyMap[monthKey];
-      const status = app.status;
-      if (month) {
-        if (status === 'Applied') month.applied += 1;
-        if (status === 'Reviewed') month.reviewed += 1;
-        if (status === 'Shortlisted') month.shortlisted += 1;
-        if (status === 'Interview') {
-          if (app.interviewDetails?.onHold === true) {
-            month.onHold += 1;
-          } else {
-            month.interview += 1;
-          }
-        }
-        if (status === 'Offered') {
-          if (app.selectionDetails?.offerStatus === 'Selected') {
-            month.selected += 1;
-          } else {
-            month.offered += 1;
-          }
-        }
-        if (status === 'Rejected') month.rejected += 1;
-      }
+      const stage = getLogicalStage(app);
+      if (month && month[stage] !== undefined) month[stage] += 1;
 
       const source = sourceLabel(app);
       sourceMap[source] = (sourceMap[source] || 0) + 1;
@@ -1621,27 +1706,16 @@ exports.getEmployerReports = async (req, res) => {
       const jobStats = jobMap[String(app.job?._id || app.job)];
       if (jobStats) {
         jobStats.applications += 1;
-        if (status === 'Shortlisted') jobStats.shortlisted += 1;
-        if (status === 'Interview') jobStats.interviews += 1;
-        if (status === 'Offered' && app.selectionDetails?.offerStatus === 'Hired') jobStats.hired += 1;
+        if (stage === 'shortlisted') jobStats.shortlisted += 1;
+        if (stage === 'interview') jobStats.interviews += 1;
+        if (app.status === 'Offered' && app.selectionDetails?.offerStatus === 'Hired') jobStats.hired += 1;
       }
     });
 
-    const statusCounts = apps.reduce((acc, app) => ({ ...acc, [app.status]: (acc[app.status] || 0) + 1 }), {});
-    const hires = apps.filter(app => app.status === 'Offered' && app.selectionDetails?.offerStatus === 'Hired').length;
-    const rejected = statusCounts.Rejected || 0;
-    const totalApplications = apps.length;
-    const offersMade = statusCounts.Offered || 0;
-    const rejectionRate = totalApplications ? Math.round((rejected / totalApplications) * 100) : 0;
-
-    const stats = {
-      totalApplications,
-      shortlisted: statusCounts.Shortlisted || 0,
-      interviews: statusCounts.Interview || 0,
-      offersMade,
-      hires,
-      rejectionRate
-    };
+    const stats = currentSummary.stats;
+    const totalApplications = stats.totalApplications;
+    const offersMade = stats.offersMade;
+    const hires = stats.hires;
 
     const monthlyOverview = monthKeys.map(item => ({ month: item.label, ...monthlyMap[item.key] }));
     const sources = Object.entries(sourceMap)
@@ -1656,7 +1730,7 @@ exports.getEmployerReports = async (req, res) => {
       { key: 'hired', title: 'Hired', value: hires }
     ].map(item => ({ ...item, percent: totalApplications ? Number(((item.value / totalApplications) * 100).toFixed(1)) : 0 }));
 
-    const recentApps = [...apps]
+    const recentApps = [...filteredApps]
       .sort((a, b) => new Date(b.updateDate || b.appliedDate) - new Date(a.updateDate || a.appliedDate))
       .slice(0, 6);
     const recentActivity = recentApps.map((app) => {
@@ -1687,21 +1761,37 @@ exports.getEmployerReports = async (req, res) => {
         conversionRate: job.applications ? Number(((job.hired / job.applications) * 100).toFixed(1)) : 0
       }));
 
-    const pipeline = {
-      applied: apps.filter(app => app.status === 'Applied').length,
-      shortlisted: statusCounts.Shortlisted || 0,
-      interview: apps.filter(app => app.status === 'Interview' && app.interviewDetails?.onHold !== true).length,
-      onHold: apps.filter(app => app.status === 'Interview' && app.interviewDetails?.onHold === true).length,
-      selected: apps.filter(app => app.status === 'Offered' && app.selectionDetails?.offerStatus === 'Selected').length,
-      offered: apps.filter(app => app.status === 'Offered' && app.selectionDetails?.offerStatus !== 'Selected').length,
-      rejected: statusCounts.Rejected || 0
-    };
+    const comparison = Object.fromEntries(Object.keys(stats).map((key) => {
+      const currentValue = Number(stats[key] || 0);
+      const previousValue = Number(previousSummary.stats[key] || 0);
+      const change = currentValue - previousValue;
+      const percent = previousValue ? Number(((change / previousValue) * 100).toFixed(1)) : (currentValue ? 100 : 0);
+      return [key, { current: currentValue, previous: previousValue, change, percent }];
+    }));
+    const history = [...filteredApps]
+      .sort((a, b) => new Date(b.appliedDate || b.createDate || 0) - new Date(a.appliedDate || a.createDate || 0))
+      .slice(0, 100)
+      .map((app) => {
+        const stage = getLogicalStage(app);
+        return {
+          id: app._id,
+          candidateName: app.candidate?.name || [app.candidate?.userId?.firstName, app.candidate?.userId?.lastName].filter(Boolean).join(' ') || 'Candidate',
+          email: app.candidate?.userId?.email || app.candidate?.email || '',
+          jobTitle: app.job?.jobTitle || 'Open Position',
+          status: stageLabels[stage] || app.status || 'Applied',
+          statusKey: stage,
+          appliedDate: formatDisplayDate(app.appliedDate || app.createDate),
+          updatedDate: formatDisplayDate(app.updateDate || app.appliedDate || app.createDate),
+          source: sourceLabel(app)
+        };
+      });
 
     res.json({
       range: {
         from: formatDate(fromDate),
         to: formatDate(toDate),
-        label: `${formatDisplayDate(fromDate)} - ${formatDisplayDate(toDate)}`
+        label: `${formatDisplayDate(fromDate)} - ${formatDisplayDate(toDate)}`,
+        previousLabel: `${formatDisplayDate(previousFromDate)} - ${formatDisplayDate(previousToDate)}`
       },
       stats,
       monthlyOverview,
@@ -1709,7 +1799,17 @@ exports.getEmployerReports = async (req, res) => {
       funnel,
       recentActivity,
       topJobs,
-      pipeline
+      pipeline: currentSummary.pipeline,
+      comparison,
+      filters: {
+        jobs: jobs.map(job => ({ id: job._id, title: job.jobTitle })),
+        statuses: statusOptions
+      },
+      history,
+      dashboardSnapshot: {
+        stats: allTimeSummary.stats,
+        pipeline: allTimeSummary.pipeline
+      }
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

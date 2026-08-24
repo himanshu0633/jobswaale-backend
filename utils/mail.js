@@ -40,7 +40,50 @@ const buildUserWelcomeEmail = ({ firstName, email, password, roleName }) => {
   `;
 };
 
+const dns = require('dns');
 const { getSettings } = require('./settings');
+
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+const transientMailCodes = new Set(['EAI_AGAIN', 'EBUSY', 'ECONNRESET', 'ETIMEDOUT', 'ESOCKET']);
+const gmailSmtpFallbackIp = process.env.GMAIL_SMTP_IPV4 || '192.178.158.109';
+
+const smtpLookup = (hostname, options, callback, attempt = 1) => {
+  const normalizedHost = String(hostname || '').toLowerCase();
+  const nextOptions = {
+    ...options,
+    family: options?.family || 4
+  };
+
+  dns.lookup(hostname, nextOptions, (error, address, family) => {
+    if (error && transientMailCodes.has(error.code) && attempt < 3) {
+      setTimeout(() => smtpLookup(hostname, options, callback, attempt + 1), 350 * attempt);
+      return;
+    }
+    if (error && transientMailCodes.has(error.code) && normalizedHost === 'smtp.gmail.com') {
+      callback(null, gmailSmtpFallbackIp, 4);
+      return;
+    }
+    callback(error, address, family);
+  });
+};
+
+const formatMailError = (error = {}) => {
+  const message = error.message || 'Failed to send email';
+  if ((error.code === 'EBUSY' || message.includes('getaddrinfo EBUSY')) && message.includes('getaddrinfo')) {
+    return 'SMTP DNS lookup is busy. Please try again in a few seconds.';
+  }
+  if (error.code === 'EAI_AGAIN') {
+    return 'SMTP DNS lookup failed temporarily. Please try again.';
+  }
+  if (error.responseCode === 535 || message.toLowerCase().includes('invalid login')) {
+    return 'SMTP login failed. For Gmail, use a 16-character Google App Password.';
+  }
+  if (error.code === 'ETIMEDOUT' || message.toLowerCase().includes('timeout')) {
+    return 'SMTP connection timed out. Please check host, port, and encryption.';
+  }
+  return message;
+};
 
 const createTransportFromSettings = (settings = {}) => {
   const host = settings.mailHost || process.env.SMTP_HOST;
@@ -62,11 +105,34 @@ const createTransportFromSettings = (settings = {}) => {
     host,
     port: Number(settings.mailPort || process.env.SMTP_PORT || 587),
     secure: settings.mailEncryption === 'ssl' || process.env.SMTP_SECURE === 'true',
+    requireTLS: settings.mailEncryption === 'tls',
+    family: 4,
+    lookup: smtpLookup,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000,
+    tls: {
+      servername: host
+    },
     auth: user ? {
       user,
       pass
     } : undefined
   });
+};
+
+const sendMailWithRetry = async (transporter, options, attempts = 3) => {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await transporter.sendMail(options);
+    } catch (error) {
+      lastError = error;
+      if (!transientMailCodes.has(error.code) || attempt === attempts) break;
+      await wait(400 * attempt);
+    }
+  }
+  throw lastError;
 };
 
 const getMailFrom = (settings = {}) => {
@@ -88,7 +154,7 @@ const sendUserWelcomeEmail = async ({ to, firstName, password, roleName }) => {
     settings = await getSettings();
     const transporter = createTransportFromSettings(settings);
 
-    await transporter.sendMail({
+    await sendMailWithRetry(transporter, {
       from: getMailFrom(settings),
       to,
       subject: 'Your JobsWaale Admin Account',
@@ -98,7 +164,7 @@ const sendUserWelcomeEmail = async ({ to, firstName, password, roleName }) => {
     return { sent: true };
   } catch (error) {
     console.log(`Mail skipped. ${error.message}. User: ${to}, Password: ${password}`);
-    return { sent: false, reason: error.message };
+    return { sent: false, reason: formatMailError(error) };
   }
 };
 
@@ -116,7 +182,7 @@ const sendAdminNotification = async ({ enabled, subject, title, rows = [] }) => 
       .map(row => `<tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;"><strong>${escapeHtml(row.label)}</strong></td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${escapeHtml(row.value || '-')}</td></tr>`)
       .join('');
 
-    await transporter.sendMail({
+    await sendMailWithRetry(transporter, {
       from: getMailFrom(settings),
       to,
       subject,
@@ -131,7 +197,7 @@ const sendAdminNotification = async ({ enabled, subject, title, rows = [] }) => 
     return { sent: true };
   } catch (error) {
     console.log(`Admin notification skipped. ${error.message}`);
-    return { sent: false, reason: error.message };
+    return { sent: false, reason: formatMailError(error) };
   }
 };
 
@@ -158,7 +224,7 @@ const sendJobAlertEmail = async ({ to, seekerName, job, employer, categoryName }
     const settings = await getSettings();
     const transporter = createTransportFromSettings(settings);
 
-    await transporter.sendMail({
+    await sendMailWithRetry(transporter, {
       from: getMailFrom(settings),
       to,
       subject: `${job.companyName || 'Employer'} posted: ${job.jobTitle}`,
@@ -168,13 +234,15 @@ const sendJobAlertEmail = async ({ to, seekerName, job, employer, categoryName }
     return { sent: true };
   } catch (error) {
     console.log(`Job alert mail skipped. ${error.message}. Recipient: ${to}`);
-    return { sent: false, reason: error.message };
+    return { sent: false, reason: formatMailError(error) };
   }
 };
 
 module.exports = {
   buildUserWelcomeEmail,
   createTransportFromSettings,
+  formatMailError,
+  sendMailWithRetry,
   sendUserWelcomeEmail,
   sendAdminNotification,
   sendJobAlertEmail

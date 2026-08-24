@@ -68,8 +68,6 @@ const getEmployerAutoMailSummary = async ({ employer, plan }) => {
     includePreferredLocation: setting.includePreferredLocation,
     includeAppliedLocation: setting.includeAppliedLocation,
     locations: setting.locations || [],
-    minExperience: setting.minExperience,
-    maxExperience: setting.maxExperience,
     lastSentAt: setting.lastSentAt
   };
 };
@@ -85,8 +83,8 @@ const updateEmployerAutoMailSetting = async ({ employer, plan, payload = {} }) =
   setting.includePreferredLocation = payload.includePreferredLocation !== false;
   setting.includeAppliedLocation = Boolean(payload.includeAppliedLocation);
   setting.locations = cleanLocations(payload.locations);
-  setting.minExperience = payload.minExperience === '' || payload.minExperience === null ? null : toNumber(payload.minExperience, null);
-  setting.maxExperience = payload.maxExperience === '' || payload.maxExperience === null ? null : toNumber(payload.maxExperience, null);
+  setting.minExperience = null;
+  setting.maxExperience = null;
   await setting.save();
   return getEmployerAutoMailSummary({ employer, plan });
 };
@@ -132,6 +130,7 @@ const sendEmployerJobAutoMails = async ({ employer, plan, job }) => {
   }).populate('userId', 'email').lean();
 
   const category = await JobCategory.findById(job.jobCategory).select('categoryName').lean();
+  const requiredExperience = getExperienceYears(job.requiredExperience || job.experience);
   let sent = 0;
   let skipped = 0;
   let failed = 0;
@@ -144,8 +143,7 @@ const sendEmployerJobAutoMails = async ({ employer, plan, job }) => {
       skipped += 1;
       continue;
     }
-    if (setting.minExperience !== null && exp < Number(setting.minExperience)) continue;
-    if (setting.maxExperience !== null && exp > Number(setting.maxExperience)) continue;
+    if (exp < requiredExperience) continue;
     const locationOk = await candidateMatchesLocation({ candidate, job, setting });
     if (!locationOk) continue;
 

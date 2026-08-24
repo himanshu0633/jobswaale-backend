@@ -6,7 +6,8 @@ const SUPER_ADMIN_ROLES = ['admin', 'superadmin', 'super admin'];
 const isSuperAdminAccount = (user) => {
   const role = String(user?.role || '').trim().toLowerCase();
   const roleName = String(user?.roleRef?.name || user?.roleName || '').trim().toLowerCase();
-  return SUPER_ADMIN_ROLES.includes(role) || SUPER_ADMIN_ROLES.includes(roleName);
+  const accountType = String(user?.accountType || '').trim().toLowerCase();
+  return accountType === 'admin' || SUPER_ADMIN_ROLES.includes(role) || SUPER_ADMIN_ROLES.includes(roleName);
 };
 
 const protect = async (req, res, next) => {
