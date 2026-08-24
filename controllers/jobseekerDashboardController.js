@@ -360,7 +360,8 @@ exports.getJobseekerDashboard = async (req, res) => {
     const appliedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Applied' });
     const reviewedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Reviewed' });
     const shortlistedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Shortlisted' });
-    const interviewsCount = await Application.countDocuments({ candidate: seeker._id, status: 'Interview' });
+    const interviewsCount = await Application.countDocuments({ candidate: seeker._id, status: 'Interview', 'interviewDetails.onHold': { $ne: true } });
+    const onHoldCount = await Application.countDocuments({ candidate: seeker._id, status: 'Interview', 'interviewDetails.onHold': true });
     const offeredCount = await Application.countDocuments({ candidate: seeker._id, status: 'Offered' });
     const rejectedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Rejected' });
     
@@ -456,6 +457,7 @@ exports.getJobseekerDashboard = async (req, res) => {
         reviewed: { value: reviewedCount, change: 'Under review' },
         shortlisted: { value: shortlistedCount, change: 'Moving forward' },
         interviews: { value: interviewsCount, change: 'Scheduled sessions' },
+        onHold: { value: onHoldCount, change: 'Kept on hold' },
         offered: { value: offeredCount, change: 'Selected / Offered' },
         rejected: { value: rejectedCount, change: 'Not selected' },
         profileViews: { value: 15 + Math.floor(Math.random() * 20), change: '+3 this week' } // realistic mock views
@@ -829,7 +831,8 @@ exports.getJobseekerApplications = async (req, res) => {
         matchScore: app.matchScore || 0,
         appliedOn: new Date(appliedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
         appliedDate,
-        status: String(app.status || 'Applied').toLowerCase(),
+        status: (app.status === 'Interview' && app.interviewDetails?.onHold) ? 'onhold' : String(app.status || 'Applied').toLowerCase(),
+        interviewDetails: app.interviewDetails || null,
         selectionDetails: app.selectionDetails || null
       };
     }).filter(Boolean);
