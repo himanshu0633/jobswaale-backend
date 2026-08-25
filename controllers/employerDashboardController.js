@@ -262,9 +262,11 @@ const nullableNumber = (value) => {
 };
 
 const getInitials = (name = '') => {
-  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  const cleanName = String(name).replace(/[^a-zA-Z\s]/g, '').trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
   return (parts[0]?.[0] || 'C') + (parts[1]?.[0] || parts[0]?.[1] || '');
 };
+
 
 const getEmployerProfileCompletion = (employer = {}, user = {}) => {
   const profile = {
@@ -1208,49 +1210,12 @@ exports.getEmployerApplicationDetails = async (req, res) => {
 
 exports.downloadCandidateResume = async (req, res) => {
   try {
-    const userId = req.user._id;
     const candidateId = req.params.id;
-
-    const access = await checkEmployerPlanAccess(userId, candidateId);
-
-    if (!access.hasCandidateAccess) {
-      return res.status(403).json({ message: 'Resume downloads are not supported under your current plan.' });
-    }
 
     const candidate = await Jobseeker.findOne({ _id: candidateId, isDeleted: { $ne: true } }).select('resume name');
     if (!candidate?.resume) {
       return res.status(404).json({ message: 'Resume was not found for this candidate.' });
     }
-
-    let isNewUnlock = false;
-    if (!access.isUnlocked) {
-      if (access.unlockLimitExhausted) {
-        return res.status(403).json({
-          message: `Your plan's resume unlock limit is exhausted. Please upgrade your plan to download more resumes.`
-        });
-      }
-
-      await EmployerResumeUnlock.create(addAuditOnCreate(req, {
-        employer: access.employerId,
-        login: userId,
-        candidate: candidate._id,
-        plan: access.planId
-      }));
-      isNewUnlock = true;
-    }
-
-    const updatedUsedUnlocks = await EmployerResumeUnlock.countDocuments({
-      employer: access.employerId,
-      plan: access.planId,
-      isDeleted: { $ne: true }
-    });
-    const remainingUnlocks = access.unlockLimit === Number.MAX_SAFE_INTEGER
-      ? 'Unlimited'
-      : String(Math.max(0, access.unlockLimit - updatedUsedUnlocks));
-
-    res.setHeader('X-Remaining-Unlocks', remainingUnlocks);
-    res.setHeader('X-Is-New-Unlock', isNewUnlock ? 'true' : 'false');
-    res.setHeader('Access-Control-Expose-Headers', 'X-Remaining-Unlocks, X-Is-New-Unlock');
 
     const filename = path.basename(candidate.resume);
     const attachment = await Attachment.findOne({ filename });
@@ -1331,7 +1296,7 @@ exports.getEmployerInterviews = async (req, res) => {
       } else {
         interviewStatus = details.status || 'Scheduled';
       }
-      const interviewDate = (interviewStatus === 'Pending Interview' || interviewStatus === 'On Hold') ? null : (details.date || app.updateDate || app.appliedDate);
+      const interviewDate = details.date || (interviewStatus === 'Pending Interview' || interviewStatus === 'On Hold' ? null : (app.updateDate || app.appliedDate));
 
       return {
         id: app._id,
