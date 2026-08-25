@@ -860,6 +860,7 @@ exports.getEmployerApplications = async (req, res) => {
         phone: showContacts ? (candidate.phone || '') : 'Hidden (Upgrade Plan)',
         location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
         jobTitle: job.jobTitle || 'Open Position',
+        jobStatus: job.status || 'inactive',
         jobType: job.jobType?.jobType || 'Full Time',
         experience: candidate.experience || 'Fresher',
         appliedDate: new Date(appliedDate).toISOString().slice(0, 10),
@@ -887,6 +888,9 @@ exports.getEmployerApplications = async (req, res) => {
         application.status
       ].join(' ').toLowerCase();
 
+      const activityFilter = String(query.applicationActivity || 'active').toLowerCase();
+      const isActiveApplication = ['active', 'featured'].includes(String(application.jobStatus || '').toLowerCase());
+      const matchesActivity = activityFilter === 'both' || (activityFilter === 'inactive' ? !isActiveApplication : isActiveApplication);
       const matchesSearch = !rawSearch || searchable.includes(rawSearch);
       const matchesJob = !query.jobTitle || application.jobTitle === query.jobTitle;
       const matchesExperience = !query.experience || application.experience === query.experience;
@@ -900,7 +904,7 @@ exports.getEmployerApplications = async (req, res) => {
         }
       }
 
-      return matchesSearch && matchesJob && matchesExperience && matchesDate && matchesScore;
+      return matchesActivity && matchesSearch && matchesJob && matchesExperience && matchesDate && matchesScore;
     });
 
     const statusCounts = applicationsPreStatusFilter.reduce((acc, item) => {
@@ -2090,9 +2094,11 @@ exports.getEmployerDashboard = async (req, res) => {
       const offerStatus = item._id.offerStatus;
       const onHold = item._id.onHold === true;
       if (!countMap[jobId]) {
-        countMap[jobId] = { total: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0 };
+        countMap[jobId] = { total: 0, applied: 0, reviewed: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, rejected: 0 };
       }
       countMap[jobId].total += item.count;
+      if (status === 'Applied') countMap[jobId].applied += item.count;
+      if (status === 'Reviewed') countMap[jobId].reviewed += item.count;
       if (status === 'Shortlisted') countMap[jobId].shortlisted += item.count;
       if (status === 'Interview') {
         if (onHold) {
@@ -2108,6 +2114,7 @@ exports.getEmployerDashboard = async (req, res) => {
           countMap[jobId].offered += item.count;
         }
       }
+      if (status === 'Rejected') countMap[jobId].rejected += item.count;
     });
 
     const latestApps = await Application.find({ job: { $in: jobIds } })
@@ -2142,7 +2149,7 @@ exports.getEmployerDashboard = async (req, res) => {
     const activeJobRows = allJobs
       .filter(job => ['Active', 'Expired'].includes(getJobDisplayStatus(job)))
       .map(job => {
-        const jCounts = countMap[String(job._id)] || { total: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0 };
+        const jCounts = countMap[String(job._id)] || { total: 0, applied: 0, reviewed: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, rejected: 0 };
         return {
           id: job._id,
           title: job.jobTitle,
@@ -2150,11 +2157,14 @@ exports.getEmployerDashboard = async (req, res) => {
           workMode: job.workMode,
           status: getJobDisplayStatus(job),
           applications: jCounts.total,
+          applied: jCounts.applied,
+          reviewed: jCounts.reviewed,
           shortlisted: jCounts.shortlisted,
           interviews: jCounts.interview,
           onHold: jCounts.onHold,
           selected: jCounts.selected,
           offered: jCounts.offered,
+          rejected: jCounts.rejected,
           postedAt: formatDate(job.createDate || job.postingDate)
         };
       });
@@ -2202,6 +2212,7 @@ exports.getEmployerDashboard = async (req, res) => {
       pipeline: {
         active: jobStats.active,
         applied: appliedCount,
+        reviewed: reviewCount,
         shortlisted: shortlistedCount,
         interview: interviewCount,
         onHold: onHoldCount,

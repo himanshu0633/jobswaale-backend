@@ -1175,3 +1175,59 @@ exports.deleteJobseekerResume = async (req, res) => {
     res.status(500).json({ message: 'Server error deleting resume' });
   }
 };
+
+exports.respondToOffer = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const { response, salaryOffered, joiningDate, message } = req.body;
+
+    if (!['accept', 'decline', 'request_change'].includes(response)) {
+      return res.status(400).json({ message: 'Invalid response type.' });
+    }
+
+    const Application = require('../models/Application');
+    const application = await Application.findById(applicationId);
+    if (!application) {
+      return res.status(404).json({ message: 'Application not found.' });
+    }
+
+    const Jobseeker = require('../models/Jobseeker');
+    const seeker = await Jobseeker.findOne({ userId: req.user._id });
+    if (!seeker || String(application.candidate) !== String(seeker._id)) {
+      return res.status(403).json({ message: 'You are not authorized to respond to this offer.' });
+    }
+
+    if (application.status !== 'Offered') {
+      return res.status(400).json({ message: 'No offer is active for this application.' });
+    }
+
+    const currentDetails = application.selectionDetails || {};
+
+    if (response === 'accept') {
+      application.selectionDetails = {
+        ...currentDetails,
+        offerStatus: 'Offer Accepted',
+        offerRespondedAt: new Date()
+      };
+    } else if (response === 'decline') {
+      application.selectionDetails = {
+        ...currentDetails,
+        offerStatus: 'Offer Declined',
+        offerRespondedAt: new Date()
+      };
+    } else if (response === 'request_change') {
+      const changeLog = `\n[Candidate Requested Changes - ${new Date().toLocaleDateString('en-IN')}]:\n- Proposed Salary: Rs. ${salaryOffered} LPA\n- Proposed Joining Date: ${joiningDate}\n- Message: ${message}\n`;
+      application.selectionDetails = {
+        ...currentDetails,
+        notes: (currentDetails.notes || '') + changeLog,
+        offerStatus: 'Offer Sent'
+      };
+    }
+
+    await application.save();
+    res.json({ message: `Offer response '${response}' recorded successfully.`, application });
+  } catch (error) {
+    console.error('Respond to Offer Error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};

@@ -22,7 +22,8 @@ const {
   getJobseekerSavedEmployers,
   toggleSaveEmployer,
   uploadJobseekerResume,
-  deleteJobseekerResume
+  deleteJobseekerResume,
+  respondToOffer
 } = require('../controllers/jobseekerDashboardController');
 
 // Middleware to ensure the user is a Jobseeker
@@ -47,6 +48,7 @@ router.get('/subscription', getJobseekerSubscription);
 router.post('/subscription/select-plan', selectJobseekerPlan);
 router.get('/applications', getJobseekerApplications);
 router.get('/applications/:applicationId', getJobseekerApplicationDetail);
+router.patch('/applications/:applicationId/offer', respondToOffer);
 router.get('/messages', listJobseekerMessages);
 router.get('/messages/unread', getJobseekerUnreadCount);
 router.get('/messages/:applicationId', getJobseekerMessageThread);
