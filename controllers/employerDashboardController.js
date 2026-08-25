@@ -1078,6 +1078,28 @@ exports.getEmployerApplicationDetails = async (req, res) => {
       return res.status(403).json({ message: 'You are not allowed to view this application.' });
     }
 
+    const candidateId = appDoc.candidate;
+    const access = await checkEmployerPlanAccess(req.user._id, candidateId);
+
+    if (!access.hasCandidateAccess) {
+      return res.status(403).json({ message: 'Viewing candidate profiles is not supported under your current plan.' });
+    }
+
+    if (!access.isUnlocked) {
+      if (access.unlockLimitExhausted) {
+        return res.status(403).json({
+          message: `Your plan's resume unlock limit is exhausted. Please upgrade your plan to view more candidates.`
+        });
+      }
+
+      await EmployerResumeUnlock.create(addAuditOnCreate(req, {
+        employer: access.employerId,
+        login: req.user._id,
+        candidate: candidateId,
+        plan: access.planId
+      }));
+    }
+
     if (appDoc.status === 'Applied') {
       appDoc.status = 'Reviewed';
       appDoc.previousStatus = 'Applied';
