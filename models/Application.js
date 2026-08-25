@@ -66,6 +66,10 @@ const ApplicationSchema = new mongoose.Schema({
       type: String,
       default: ''
     },
+    manualAddress: {
+      type: String,
+      default: ''
+    },
     notes: {
       type: String,
       default: ''

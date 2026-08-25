@@ -3437,6 +3437,7 @@ exports.scheduleApplicationInterview = async (req, res) => {
       onHold: isOnHold,
       interviewer: interviewer || application.interviewDetails?.interviewer || application.job?.contactPerson || req.user.firstName || req.user.companyName || '',
       locationOrLink: locationOrLink ?? application.interviewDetails?.locationOrLink ?? '',
+      manualAddress: req.body.manualAddress ?? application.interviewDetails?.manualAddress ?? '',
       notes: notes ?? application.interviewDetails?.notes ?? ''
     };
 
