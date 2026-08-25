@@ -828,6 +828,12 @@ exports.getEmployerApplications = async (req, res) => {
     const jobs = await ensureApplicationsExist(userId);
     const jobIds = jobs.map(j => j._id);
 
+    // Clean up any stale interview/selection details for pre-interview applications
+    await Application.updateMany(
+      { job: { $in: jobIds }, status: { $in: ['Applied', 'Reviewed', 'Shortlisted'] } },
+      { $unset: { interviewDetails: "", selectionDetails: "" } }
+    );
+
     const dbApps = await Application.find({ job: { $in: jobIds } })
       .populate({
         path: 'job',
@@ -1296,7 +1302,7 @@ exports.getEmployerInterviews = async (req, res) => {
       } else {
         interviewStatus = details.status || 'Scheduled';
       }
-      const interviewDate = details.date || (interviewStatus === 'Pending Interview' || interviewStatus === 'On Hold' ? null : (app.updateDate || app.appliedDate));
+      const interviewDate = (interviewStatus === 'Pending Interview' || interviewStatus === 'On Hold') ? null : (details.date || app.updateDate || app.appliedDate);
 
       return {
         id: app._id,
@@ -1312,7 +1318,7 @@ exports.getEmployerInterviews = async (req, res) => {
         type: normalizeInterviewType(details.type),
         interviewDate: interviewDate ? new Date(interviewDate).toISOString().slice(0, 10) : '',
         displayDate: formatDisplayDate(interviewDate),
-        time: details.time || '',
+        time: (interviewStatus === 'Pending Interview' || interviewStatus === 'On Hold') ? '' : (details.time || ''),
         interviewer: details.interviewer || job.contactPerson || req.user.firstName || req.user.companyName || 'Interviewer',
         locationOrLink: details.locationOrLink || '',
         notes: details.notes || '',
@@ -3267,6 +3273,10 @@ exports.updateApplicationStatus = async (req, res) => {
       application.rejectedDate = new Date();
     }
     application.status = status;
+    if (['Applied', 'Reviewed', 'Shortlisted'].includes(status)) {
+      application.interviewDetails = undefined;
+      application.selectionDetails = undefined;
+    }
     if (status === 'Shortlisted') {
       application.shortlistedDate = new Date();
     }
