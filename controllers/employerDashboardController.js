@@ -1289,10 +1289,10 @@ exports.getEmployerInterviews = async (req, res) => {
       if (details.status === 'Completed' || details.status === 'Cancelled') return null; // Exclude Completed/Cancelled
 
       let interviewStatus = 'Scheduled';
-      if (details.onHold || details.status === 'On Hold') {
-        interviewStatus = 'On Hold';
-      } else if (app.status === 'Shortlisted') {
+      if (app.status === 'Shortlisted') {
         interviewStatus = 'Pending Interview';
+      } else if (details.onHold || details.status === 'On Hold') {
+        interviewStatus = 'On Hold';
       } else {
         interviewStatus = details.status || 'Scheduled';
       }
