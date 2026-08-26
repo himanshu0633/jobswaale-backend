@@ -433,6 +433,110 @@ const sendMessage = (actor) => async (req, res) => {
   }
 };
 
+const sendStatusUpdateMessage = async (applicationId, status, employerUserId) => {
+  try {
+    const application = await Application.findById(applicationId)
+      .populate(populateApplicationQuery())
+      .lean();
+
+    if (!application || !application.job || !application.candidate) {
+      console.error('sendStatusUpdateMessage: Application not found or incomplete', applicationId);
+      return;
+    }
+
+    const jobTitle = application.job.jobTitle || 'Job';
+    let body = `Your application for the "${jobTitle}" position has been updated. Current status: ${status}.`;
+
+    if ((status === 'Interview' || status === 'Interview Scheduled') && application.interviewDetails && application.interviewDetails.date) {
+      const details = application.interviewDetails;
+      const formattedDate = new Date(details.date).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+      const lines = [
+        `Your application for the "${jobTitle}" position has been updated. An interview has been scheduled with the following details:`,
+        `Date: ${formattedDate}`,
+        `Time: ${details.time || 'N/A'}`,
+        `Mode: ${details.type || 'N/A'}`
+      ];
+      if (details.interviewer) {
+        lines.push(`Interviewer: ${details.interviewer}`);
+      }
+      if (details.locationOrLink) {
+        lines.push(`Link/Location: ${details.locationOrLink}`);
+      }
+      if (details.manualAddress) {
+        lines.push(`Address: ${details.manualAddress}`);
+      }
+      if (details.notes) {
+        lines.push(`Notes: ${details.notes}`);
+      }
+      body = lines.join('\n');
+    } else if (status === 'Interview On Hold') {
+      body = `Your application for the "${jobTitle}" position has been placed on hold.`;
+    }
+
+    // Create the message in DB
+    const message = await Message.create({
+      application: application._id,
+      job: application.job._id,
+      employer: application.job.login,
+      candidate: application.candidate._id,
+      sender: employerUserId,
+      senderRole: 'employer',
+      body
+    });
+
+    const recipientUserId = application.candidate.userId?._id || application.candidate.userId;
+
+    const io = getIO();
+    if (io) {
+      // Build the thread summary for both roles
+      const recipientThread = await buildThreadSummary(application, 'jobseeker');
+      const senderThread = await buildThreadSummary(application, 'employer');
+
+      // Emit message:new to recipient (jobseeker)
+      if (recipientUserId) {
+        io.to(getUserRoom(recipientUserId)).emit('message:new', {
+          applicationId: application._id,
+          jobId: application.job._id,
+          jobTitle: application.job.jobTitle || 'Job',
+          senderRole: 'employer',
+          recipientRole: 'jobseeker',
+          message: formatMessage(message, 'jobseeker'),
+          thread: recipientThread,
+          unreadCount: await countUnreadMessages('jobseeker', recipientUserId)
+        });
+      }
+
+      // Emit message:new to sender (employer)
+      io.to(getUserRoom(employerUserId)).emit('message:new', {
+        applicationId: application._id,
+        jobId: application.job._id,
+        jobTitle: application.job.jobTitle || 'Job',
+        senderRole: 'employer',
+        recipientRole: 'jobseeker',
+        message: formatMessage(message, 'employer'),
+        thread: senderThread,
+        unreadCount: await countUnreadMessages('employer', employerUserId)
+      });
+
+      // Emit messages:unread update to both
+      if (recipientUserId) {
+        io.to(getUserRoom(recipientUserId)).emit('messages:unread', {
+          unreadCount: await countUnreadMessages('jobseeker', recipientUserId)
+        });
+      }
+      io.to(getUserRoom(employerUserId)).emit('messages:unread', {
+        unreadCount: await countUnreadMessages('employer', employerUserId)
+      });
+    }
+  } catch (error) {
+    console.error('Error in sendStatusUpdateMessage:', error);
+  }
+};
+
 module.exports = {
   listEmployerMessages: listMessages('employer'),
   getEmployerUnreadCount: getUnreadCount('employer'),
@@ -441,5 +545,6 @@ module.exports = {
   listJobseekerMessages: listMessages('jobseeker'),
   getJobseekerUnreadCount: getUnreadCount('jobseeker'),
   getJobseekerMessageThread: getThread('jobseeker'),
-  sendJobseekerMessage: sendMessage('jobseeker')
+  sendJobseekerMessage: sendMessage('jobseeker'),
+  sendStatusUpdateMessage
 };

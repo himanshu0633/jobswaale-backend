@@ -1112,6 +1112,16 @@ exports.getEmployerApplicationDetails = async (req, res) => {
       appDoc.status = 'Reviewed';
       appDoc.previousStatus = 'Applied';
       await appDoc.save();
+
+      // Send status update message to chat thread
+      const { sendStatusUpdateMessage } = require('./messageController');
+      (async () => {
+        try {
+          await sendStatusUpdateMessage(appDoc._id, 'Reviewed', req.user._id);
+        } catch (err) {
+          console.error('Error sending chat status update message:', err);
+        }
+      })();
     }
 
     const application = await Application.findById(id)
@@ -3299,6 +3309,16 @@ exports.updateApplicationStatus = async (req, res) => {
     }
     await application.save();
 
+    // Send status update message to chat thread
+    const { sendStatusUpdateMessage } = require('./messageController');
+    (async () => {
+      try {
+        await sendStatusUpdateMessage(application._id, status, req.user._id);
+      } catch (err) {
+        console.error('Error sending chat status update message:', err);
+      }
+    })();
+
     // Send application status update email to jobseeker
     const { sendApplicationStatusEmail } = require('../utils/jobNotifications');
     (async () => {
@@ -3439,6 +3459,16 @@ exports.scheduleApplicationInterview = async (req, res) => {
     };
 
     await application.save();
+
+    // Send status update message to chat thread
+    const { sendStatusUpdateMessage } = require('./messageController');
+    (async () => {
+      try {
+        await sendStatusUpdateMessage(application._id, isOnHold ? 'Interview On Hold' : 'Interview Scheduled', req.user._id);
+      } catch (err) {
+        console.error('Error sending chat status update message:', err);
+      }
+    })();
 
     if (isOnHold) {
       return res.json({ message: 'Application moved to interview on hold.', application });
