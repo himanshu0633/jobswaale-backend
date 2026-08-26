@@ -457,21 +457,22 @@ const sendStatusUpdateMessage = async (applicationId, status, employerUserId) =>
       });
       const lines = [
         `Your application for the "${jobTitle}" position has been updated. An interview has been scheduled with the following details:`,
-        `Date: ${formattedDate}`,
-        `Time: ${details.time || 'N/A'}`,
-        `Mode: ${details.type || 'N/A'}`
+        ``,
+        `📅 Date: ${formattedDate}`,
+        `⏰ Time: ${details.time || 'N/A'}`,
+        `💼 Mode: ${details.type || 'N/A'}`
       ];
       if (details.interviewer) {
-        lines.push(`Interviewer: ${details.interviewer}`);
+        lines.push(`👤 Interviewer: ${details.interviewer}`);
       }
       if (details.locationOrLink) {
-        lines.push(`Link/Location: ${details.locationOrLink}`);
+        lines.push(`🔗 Link/Location: ${details.locationOrLink}`);
       }
       if (details.manualAddress) {
-        lines.push(`Address: ${details.manualAddress}`);
+        lines.push(`📍 Address: ${details.manualAddress}`);
       }
       if (details.notes) {
-        lines.push(`Notes: ${details.notes}`);
+        lines.push(``, `📝 Notes: ${details.notes}`);
       }
       body = lines.join('\n');
     } else if (status === 'Interview On Hold') {
