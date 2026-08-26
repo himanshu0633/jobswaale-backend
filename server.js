@@ -129,6 +129,16 @@ app.use('/api/cron', require('./routes/cronRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 
 
+app.get('/api/test-app/:id', async (req, res) => {
+  try {
+    const Application = require('./models/Application');
+    const app = await Application.findById(req.params.id).lean();
+    res.json(app);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to JobsWaale API Portal' });
