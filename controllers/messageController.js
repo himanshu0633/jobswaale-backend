@@ -392,13 +392,13 @@ const sendMessage = (actor) => async (req, res) => {
       : application.candidate.name;
 
     if (recipientUserId) {
-      await createAndSendNotification({
+      createAndSendNotification({
         recipientId: recipientUserId,
         title: 'New Chat Message',
         message: `You received a new message from ${senderName}: "${(body || attachment?.originalName || 'Attachment').slice(0, 80)}"`,
         type: 'general',
         redirectUrl: actor === 'employer' ? `/jobseeker/messages` : `/employer/messages`
-      });
+      }).catch(err => console.error('Failed to send notification for new message:', err));
     }
 
     const io = getIO();
