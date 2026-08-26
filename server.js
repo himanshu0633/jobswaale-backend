@@ -129,6 +129,58 @@ app.use('/api/cron', require('./routes/cronRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 
 
+// TEMPORARY DATABASE CLEANUP ENDPOINT
+app.get('/api/temp-db-cleanup', async (req, res) => {
+  try {
+    const Application = require('./models/Application');
+    const EmployerResumeUnlock = require('./models/EmployerResumeUnlock');
+    const Message = require('./models/Message');
+    const Notification = require('./models/Notification');
+
+    // 1. Reset all application statuses to 'Applied'
+    const appResult = await Application.updateMany(
+      {},
+      {
+        $set: {
+          status: 'Applied',
+          previousStatus: '',
+          rejectedFromStatus: '',
+          matchScore: 0
+        },
+        $unset: {
+          rejectedDate: '',
+          shortlistedDate: '',
+          interviewDetails: '',
+          selectionDetails: ''
+        }
+      }
+    );
+
+    // 2. Remove all resume unlocks
+    const unlockResult = await EmployerResumeUnlock.deleteMany({});
+
+    // 3. Remove all chat messages
+    const messageResult = await Message.deleteMany({});
+
+    // 4. Remove all notifications
+    const notifResult = await Notification.deleteMany({});
+
+    res.json({
+      success: true,
+      message: 'Database cleanup completed successfully on production!',
+      details: {
+        applicationsModified: appResult.modifiedCount,
+        unlocksDeleted: unlockResult.deletedCount,
+        messagesDeleted: messageResult.deletedCount,
+        notificationsDeleted: notifResult.deletedCount
+      }
+    });
+  } catch (err) {
+    console.error('Temp Cleanup Error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to JobsWaale API Portal' });
