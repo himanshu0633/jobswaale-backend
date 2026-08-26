@@ -62,6 +62,16 @@ router.get('/auto-mail-settings', getEmployerAutoMailSettings);
 router.put('/auto-mail-settings', updateEmployerAutoMailSettings);
 router.get('/applications', getEmployerApplications);
 router.get('/applicant-history', getEmployerApplicantHistory);
+router.get('/test-app/:id', async (req, res) => {
+  try {
+    const Application = require('../models/Application');
+    const app = await Application.findById(req.params.id).lean();
+    res.json(app);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/applications/:id', getEmployerApplicationDetails);
 router.get('/messages', listEmployerMessages);
 router.get('/messages/unread', getEmployerUnreadCount);
