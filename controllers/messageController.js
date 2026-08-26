@@ -53,7 +53,7 @@ const formatAttachment = (attachment) => {
 const formatMessage = (message, actor) => ({
   id: message._id,
   text: message.body,
-  time: new Date(message.createDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+  time: new Date(message.createDate).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }),
   date: message.createDate,
   sender: message.senderRole === actor ? 'sent' : 'received',
   senderRole: message.senderRole,
@@ -172,7 +172,7 @@ const buildThreadSummaryFromMeta = (application, actor, lastMessage = null, unre
     lastMessage: lastMessage?.body || (lastMessage?.attachment?.originalName ? `Attachment: ${lastMessage.attachment.originalName}` : 'No messages yet.'),
     lastMessageAt: lastMessage?.createDate || application.updateDate || application.createDate,
     time: lastMessage
-      ? new Date(lastMessage.createDate).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+      ? new Date(lastMessage.createDate).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
       : '',
     unread: unreadCount,
     online
@@ -452,7 +452,8 @@ const sendStatusUpdateMessage = async (applicationId, status, employerUserId) =>
       const formattedDate = new Date(details.date).toLocaleDateString('en-IN', {
         day: 'numeric',
         month: 'long',
-        year: 'numeric'
+        year: 'numeric',
+        timeZone: 'Asia/Kolkata'
       });
       const lines = [
         `Your application for the "${jobTitle}" position has been updated. An interview has been scheduled with the following details:`,
