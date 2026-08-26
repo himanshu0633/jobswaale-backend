@@ -922,18 +922,36 @@ exports.getEmployerApplications = async (req, res) => {
       return matchesActivity && matchesSearch && matchesJob && matchesExperience && matchesDate && matchesScore;
     });
 
+    const getAppStatus = (application) => {
+      if (application.status === 'Interview' && application.interviewDetails?.onHold) return 'OnHold';
+      if (application.status === 'Offered') {
+        return application.selectionDetails?.offerStatus || 'Selected';
+      }
+      return application.status;
+    };
+
     const statusCounts = applicationsPreStatusFilter.reduce((acc, item) => {
-      const itemStatus = (item.status === 'Interview' && item.interviewDetails?.onHold) ? 'OnHold' : item.status;
-      return { ...acc, [itemStatus]: (acc[itemStatus] || 0) + 1 };
+      const itemStatus = getAppStatus(item);
+      acc[itemStatus] = (acc[itemStatus] || 0) + 1;
+      
+      // Also map 'Offered' general key for backward compatibility
+      if (item.status === 'Offered') {
+        acc['Offered'] = (acc['Offered'] || 0) + 1;
+      }
+      return acc;
     }, {});
 
     const filteredApplications = applicationsPreStatusFilter.filter((application) => {
       let matchesStatus = true;
       if (query.status) {
-        const appStatus = (application.status === 'Interview' && application.interviewDetails?.onHold) ? 'OnHold' : application.status;
-        matchesStatus = appStatus === query.status;
+        const appStatus = getAppStatus(application);
+        if (query.status === 'Offered') {
+          matchesStatus = application.status === 'Offered';
+        } else {
+          matchesStatus = appStatus === query.status;
+        }
       } else if (query.statusGroup === 'queue') {
-        const appStatus = (application.status === 'Interview' && application.interviewDetails?.onHold) ? 'OnHold' : application.status;
+        const appStatus = getAppStatus(application);
         matchesStatus = ['Applied', 'Reviewed'].includes(appStatus);
       }
       return matchesStatus;
@@ -950,7 +968,11 @@ exports.getEmployerApplications = async (req, res) => {
         shortlisted: statusCounts.Shortlisted || 0,
         interviews: statusCounts.Interview || 0,
         onHold: statusCounts.OnHold || 0,
-        selected: statusCounts.Offered || statusCounts.Hired || 0,
+        selected: statusCounts.Selected || 0,
+        offerSent: statusCounts['Offer Sent'] || 0,
+        offerAccepted: statusCounts['Offer Accepted'] || 0,
+        hired: statusCounts.Hired || 0,
+        offerDeclined: statusCounts['Offer Declined'] || 0,
         rejected: statusCounts.Rejected || 0
       },
       pipeline: {
@@ -959,7 +981,7 @@ exports.getEmployerApplications = async (req, res) => {
         shortlisted: statusCounts.Shortlisted || 0,
         interview: statusCounts.Interview || 0,
         onHold: statusCounts.OnHold || 0,
-        offered: statusCounts.Offered || statusCounts.Hired || 0,
+        offered: statusCounts.Offered || 0,
         rejected: statusCounts.Rejected || 0
       },
       filters: {
