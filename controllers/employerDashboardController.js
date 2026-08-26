@@ -1457,8 +1457,10 @@ exports.getEmployerSelected = async (req, res) => {
       if (!candidate || !job) return null;
 
       const details = app.selectionDetails || {};
-      const selectedDate = details.selectedDate || app.updateDate || app.appliedDate;
       const offerStatus = details.offerStatus || 'Selected';
+      if (offerStatus !== 'Selected') return null;
+
+      const selectedDate = details.selectedDate || app.updateDate || app.appliedDate;
       const salaryLpa = getSalaryLpa(app);
 
       return {
