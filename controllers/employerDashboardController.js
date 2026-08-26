@@ -738,6 +738,9 @@ exports.getEmployerCandidateProfile = async (req, res) => {
     let showContacts = false;
     let allowDownload = false;
     let autoUnlocked = false;
+    let remainingUnlocks = Number.isFinite(access.unlockLimit)
+      ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0))
+      : 'Unlimited';
 
     if (access.hasCandidateAccess) {
       if (access.isUnlocked) {
@@ -754,6 +757,9 @@ exports.getEmployerCandidateProfile = async (req, res) => {
         showContacts = true;
         allowDownload = true;
         autoUnlocked = true;
+        remainingUnlocks = Number.isFinite(access.unlockLimit)
+          ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0) - 1)
+          : 'Unlimited';
       }
     }
 
@@ -768,6 +774,7 @@ exports.getEmployerCandidateProfile = async (req, res) => {
       hasCandidateAccess: access.hasCandidateAccess,
       unlockLimitExhausted: access.unlockLimitExhausted && !showContacts,
       autoUnlocked,
+      remainingUnlocks,
       phone: showContacts ? (candidate.phone || candidate.userId?.phone || '') : mapped.phone,
       designation: candidate.designation || mapped.role,
       bio: candidate.bio || `Experienced ${mapped.role} profile with ${mapped.experience} experience.`,
@@ -1088,6 +1095,10 @@ exports.getEmployerApplicationDetails = async (req, res) => {
 
     const candidateId = appDoc.candidate;
     const access = await checkEmployerPlanAccess(req.user._id, candidateId);
+    let autoUnlocked = false;
+    let remainingUnlocks = Number.isFinite(access.unlockLimit)
+      ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0))
+      : 'Unlimited';
 
     if (!access.hasCandidateAccess) {
       return res.status(403).json({ message: 'Viewing candidate profiles is not supported under your current plan.' });
@@ -1106,6 +1117,10 @@ exports.getEmployerApplicationDetails = async (req, res) => {
         candidate: candidateId,
         plan: access.planId
       }));
+      autoUnlocked = true;
+      remainingUnlocks = Number.isFinite(access.unlockLimit)
+        ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0) - 1)
+        : 'Unlimited';
     }
 
     if (appDoc.status === 'Applied') {
@@ -1172,6 +1187,8 @@ exports.getEmployerApplicationDetails = async (req, res) => {
       rejectedDisplayDate: application.rejectedDate ? formatDisplayDate(application.rejectedDate) : '',
       interviewDetails: application.interviewDetails || null,
       selectionDetails: application.selectionDetails || null,
+      autoUnlocked,
+      remainingUnlocks,
       candidate: {
         id: candidate._id,
         name: candidate.name,
@@ -2134,12 +2151,13 @@ exports.getEmployerDashboard = async (req, res) => {
     const interviewApps = await Application.find({
       job: { $in: jobIds },
       status: 'Interview',
-      'interviewDetails.date': { $gte: todayStart }
+      'interviewDetails.date': { $gte: todayStart },
+      'interviewDetails.onHold': { $ne: true }
     })
       .populate('candidate', 'name')
       .populate('job', 'jobTitle')
-      .sort({ "interviewDetails.date": 1 })
-      .limit(4)
+      .sort({ "interviewDetails.date": 1, "interviewDetails.time": 1 })
+      .limit(6)
       .lean();
 
     const jobStats = {
@@ -2244,7 +2262,8 @@ exports.getEmployerDashboard = async (req, res) => {
         candidateName: app.candidate?.name || 'N/A',
         position: app.job?.jobTitle || 'Open Position',
         scheduledAt: app.interviewDetails?.date ? formatDate(app.interviewDetails.date) : formatDate(new Date()),
-        scheduledTime: app.interviewDetails?.time || ''
+        scheduledTime: app.interviewDetails?.time || '',
+        type: app.interviewDetails?.type || ''
       })),
       recentActivity: [
         { type: 'application', title: 'New Application Received', description: `${latestApps[0]?.candidate?.name || 'Candidate'} applied for ${latestApps[0]?.job?.jobTitle || 'a job'}`, time: '2 minutes ago' },
