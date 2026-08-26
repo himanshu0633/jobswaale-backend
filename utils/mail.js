@@ -238,6 +238,26 @@ const sendJobAlertEmail = async ({ to, seekerName, job, employer, categoryName }
   }
 };
 
+const sendCustomMail = async ({ to, subject, html, attachments }) => {
+  try {
+    const settings = await getSettings();
+    const transporter = createTransportFromSettings(settings);
+
+    await sendMailWithRetry(transporter, {
+      from: getMailFrom(settings),
+      to,
+      subject,
+      html,
+      attachments
+    });
+
+    return { sent: true };
+  } catch (error) {
+    console.error(`Mail send failed. ${error.message}. Recipient: ${to}`);
+    return { sent: false, reason: formatMailError(error) };
+  }
+};
+
 module.exports = {
   buildUserWelcomeEmail,
   createTransportFromSettings,
@@ -245,5 +265,6 @@ module.exports = {
   sendMailWithRetry,
   sendUserWelcomeEmail,
   sendAdminNotification,
-  sendJobAlertEmail
+  sendJobAlertEmail,
+  sendCustomMail
 };

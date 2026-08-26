@@ -171,6 +171,7 @@ const buildThreadSummaryFromMeta = (application, actor, lastMessage = null, unre
       : '',
     lastMessage: lastMessage?.body || (lastMessage?.attachment?.originalName ? `Attachment: ${lastMessage.attachment.originalName}` : 'No messages yet.'),
     lastMessageAt: lastMessage?.createDate || application.updateDate || application.createDate,
+    hasMessages: Boolean(lastMessage),
     time: lastMessage
       ? new Date(lastMessage.createDate).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })
       : '',
@@ -230,6 +231,13 @@ const buildThreadSummaries = async (applications, actor) => {
   ));
 };
 
+const sortThreadsByRecentMessage = (threads = []) => threads.sort((a, b) => {
+  if (a.hasMessages !== b.hasMessages) {
+    return a.hasMessages ? -1 : 1;
+  }
+  return new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0);
+});
+
 const listMessages = (actor) => async (req, res) => {
   try {
     const messageableOnly = ['1', 'true', 'yes'].includes(String(req.query.messageableOnly || '').toLowerCase());
@@ -241,8 +249,7 @@ const listMessages = (actor) => async (req, res) => {
 
     const visible = messageableOnly ? filtered.filter(app => canMessageApplication(app, actor)) : filtered;
     const threads = await buildThreadSummaries(visible, actor);
-    threads.sort((a, b) => new Date(b.lastMessageAt || 0) - new Date(a.lastMessageAt || 0));
-    res.json({ threads });
+    res.json({ threads: sortThreadsByRecentMessage(threads) });
   } catch (error) {
     console.error('List Messages Error:', error);
     res.status(500).json({ message: 'Server error loading messages' });

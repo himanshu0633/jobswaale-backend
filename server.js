@@ -91,6 +91,23 @@ app.get('/uploads/employer-logos/:filename', async (req, res, next) => {
   }
 });
 
+app.get('/uploads/offers/:filename', async (req, res, next) => {
+  try {
+    const Attachment = require('./models/Attachment');
+    const file = await Attachment.findOne({ filename: req.params.filename });
+    if (!file) {
+      return next();
+    }
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Length', file.size);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    return res.send(file.data);
+  } catch (err) {
+    console.error('Fetch offer letter error:', err);
+    next(err);
+  }
+});
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
 if (isVercel) {

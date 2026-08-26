@@ -4042,3 +4042,258 @@ exports.submitSupportTicket = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// Get Employer Email Templates
+exports.getEmailTemplates = async (req, res) => {
+  try {
+    const EmailTemplate = require('../models/EmailTemplate');
+    const templates = await EmailTemplate.find({ employer: req.user._id })
+      .sort({ createDate: -1 })
+      .lean();
+
+    res.json(templates);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Create Email Template
+exports.createEmailTemplate = async (req, res) => {
+  try {
+    const EmailTemplate = require('../models/EmailTemplate');
+    const { name, subject, body } = req.body;
+    if (!name || !subject || !body) {
+      return res.status(400).json({ message: 'Template name, subject, and body are required.' });
+    }
+
+    const template = await EmailTemplate.create({
+      employer: req.user._id,
+      name,
+      subject,
+      body
+    });
+
+    res.status(201).json({ message: 'Email template created successfully.', template });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Update Email Template
+exports.updateEmailTemplate = async (req, res) => {
+  try {
+    const EmailTemplate = require('../models/EmailTemplate');
+    const { id } = req.params;
+    const { name, subject, body } = req.body;
+
+    const template = await EmailTemplate.findOne({ _id: id, employer: req.user._id });
+    if (!template) {
+      return res.status(404).json({ message: 'Template not found.' });
+    }
+
+    if (name) template.name = name;
+    if (subject) template.subject = subject;
+    if (body) template.body = body;
+
+    await template.save();
+    res.json({ message: 'Email template updated successfully.', template });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Delete Email Template
+exports.deleteEmailTemplate = async (req, res) => {
+  try {
+    const EmailTemplate = require('../models/EmailTemplate');
+    const { id } = req.params;
+    const template = await EmailTemplate.findOneAndDelete({ _id: id, employer: req.user._id });
+    if (!template) {
+      return res.status(404).json({ message: 'Template not found.' });
+    }
+    res.json({ message: 'Email template deleted successfully.' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Get Sent Offers
+exports.getSentOffers = async (req, res) => {
+  try {
+    const SentOffer = require('../models/SentOffer');
+    const offers = await SentOffer.find({ employer: req.user._id })
+      .populate('candidate', 'name phone')
+      .populate({
+        path: 'application',
+        populate: { path: 'job', select: 'jobTitle' }
+      })
+      .sort({ createDate: -1 })
+      .lean();
+
+    res.json(offers);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Send Candidate Offer Letter
+exports.sendOfferLetter = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { subject, message, saveAsTemplate, templateName } = req.body;
+
+    if (!subject || !message) {
+      return res.status(400).json({ message: 'Subject and message are required.' });
+    }
+
+    const application = await Application.findById(id).populate('job', 'login jobTitle companyName minSalary maxSalary');
+    if (!application) {
+      return res.status(404).json({ message: 'Application not found.' });
+    }
+
+    if (String(application.job?.login) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'You are not allowed to update this application.' });
+    }
+
+    // Retrieve candidate user email
+    const fullApp = await Application.findById(id)
+      .populate({
+        path: 'candidate',
+        populate: { path: 'userId', select: 'email' }
+      })
+      .lean();
+
+    const candidateEmail = fullApp?.candidate?.userId?.email;
+    const candidateUserId = fullApp?.candidate?.userId?._id || fullApp?.candidate?.userId;
+
+    if (!candidateEmail) {
+      return res.status(400).json({ message: 'Candidate email address not found.' });
+    }
+
+    let attachmentUrl = '';
+    let attachmentName = '';
+    let attachments = [];
+
+    if (req.file) {
+      const uploadedFile = req.file;
+      const fileData = fs.readFileSync(uploadedFile.path);
+      await Attachment.create({
+        filename: uploadedFile.filename,
+        data: fileData,
+        mimeType: uploadedFile.mimetype,
+        size: uploadedFile.size
+      });
+
+      attachmentUrl = `/uploads/offers/${uploadedFile.filename}`;
+      attachmentName = uploadedFile.originalname;
+
+      attachments.push({
+        filename: uploadedFile.originalname,
+        content: fileData,
+        contentType: uploadedFile.mimetype
+      });
+
+      // Cleanup local temp file
+      fs.unlink(uploadedFile.path, () => {});
+    }
+
+    // Save template if requested
+    if ((saveAsTemplate === 'true' || saveAsTemplate === true) && templateName) {
+      const EmailTemplate = require('../models/EmailTemplate');
+      await EmailTemplate.create({
+        employer: req.user._id,
+        name: templateName,
+        subject,
+        body: message
+      });
+    }
+
+    // Update application status to Offered
+    const previousStatus = application.status;
+    application.previousStatus = previousStatus;
+    application.status = 'Offered';
+
+    const currentDetails = application.selectionDetails || {};
+    application.selectionDetails = {
+      ...currentDetails,
+      selectedDate: currentDetails.selectedDate || new Date(),
+      interviewScore: currentDetails.interviewScore ?? application.matchScore ?? null,
+      offerStatus: 'Offer Sent',
+      salaryOffered: currentDetails.salaryOffered ?? application.job?.maxSalary ?? application.job?.minSalary ?? null,
+      offerSentAt: new Date(),
+      joiningDate: currentDetails.joiningDate,
+      employmentType: currentDetails.employmentType || '',
+      notes: currentDetails.notes || '',
+      offerRespondedAt: null,
+      hiredAt: null
+    };
+
+    await application.save();
+
+    // Log the sent offer
+    const SentOffer = require('../models/SentOffer');
+    const sentOffer = await SentOffer.create({
+      employer: req.user._id,
+      candidate: application.candidate,
+      application: application._id,
+      candidateEmail,
+      subject,
+      message,
+      attachmentUrl,
+      attachmentName
+    });
+
+    // Send custom email using utils/mail
+    const { sendCustomMail } = require('../utils/mail');
+    const html = `
+      <div style="font-family: Arial, sans-serif; font-size: 15px; color: #333333; line-height: 1.6; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <h2 style="color: #6658dd; margin-top: 0;">Job Offer from ${fullApp.job?.companyName || 'Employer'}</h2>
+        <p>Dear ${fullApp.candidate?.name || 'Candidate'},</p>
+        <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; border-left: 4px solid #6658dd; margin: 20px 0; white-space: pre-wrap;">${message}</div>
+        <p style="font-size: 13px; color: #64748b;">Please login to your JobsWaale account to accept or decline this offer.</p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+        <div style="font-size: 11px; color: #94a3b8; text-align: center;">Sent via JobsWaale Job Portal</div>
+      </div>
+    `;
+
+    await sendCustomMail({
+      to: candidateEmail,
+      subject,
+      html,
+      attachments
+    });
+
+    // Send chat message update
+    const { sendStatusUpdateMessage } = require('./messageController');
+    try {
+      await sendStatusUpdateMessage(application._id, 'Offered', req.user._id);
+    } catch (err) {
+      console.error('Error sending chat status update message:', err);
+    }
+
+    // Send application status update email (this uses the default notification system)
+    const { sendApplicationStatusEmail } = require('../utils/jobNotifications');
+    try {
+      if (candidateUserId) {
+        await sendApplicationStatusEmail({
+          to: candidateEmail,
+          seekerName: fullApp.candidate.name,
+          jobTitle: fullApp.job?.jobTitle || 'Job Position',
+          companyName: fullApp.job?.companyName || 'Employer',
+          status: 'Offer Sent',
+          recipientId: candidateUserId
+        });
+      }
+    } catch (err) {
+      console.error('Error sending application status update email:', err);
+    }
+
+    res.json({
+      message: 'Offer letter sent successfully.',
+      application,
+      sentOffer
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

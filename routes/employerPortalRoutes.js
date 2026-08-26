@@ -3,6 +3,7 @@ const router = express.Router();
 const { protect, authorizeEmployerPortal } = require('../middleware/auth');
 const { uploadMessageAttachment } = require('../middleware/messageUpload');
 const { createImageUpload } = require('../middleware/imageUpload');
+const { uploadOfferFile } = require('../middleware/offerUpload');
 const {
   listEmployerMessages,
   getEmployerUnreadCount,
@@ -46,7 +47,13 @@ const {
   getEmployerSettings,
   updateEmployerSettings,
   updateEmployerAutoMailSettings,
-  submitSupportTicket
+  submitSupportTicket,
+  getEmailTemplates,
+  createEmailTemplate,
+  updateEmailTemplate,
+  deleteEmailTemplate,
+  getSentOffers,
+  sendOfferLetter
 } = require('../controllers/employerDashboardController');
 
 router.use(protect, authorizeEmployerPortal);
@@ -82,6 +89,16 @@ router.post('/jobs', createEmployerJob);
 router.patch('/jobs/:id/action', updateEmployerJobAction);
 router.put('/jobs/:id', updateEmployerJob);
 router.delete('/jobs/:id', deleteEmployerJob);
+
+// Email template routes
+router.get('/email-templates', getEmailTemplates);
+router.post('/email-templates', createEmailTemplate);
+router.put('/email-templates/:id', updateEmailTemplate);
+router.delete('/email-templates/:id', deleteEmailTemplate);
+
+// Sent Offer routes
+router.get('/sent-offers', getSentOffers);
+router.post('/applications/:id/send-offer', uploadOfferFile, sendOfferLetter);
 
 // Application actions
 router.patch('/applications/:id/status', updateApplicationStatus);
