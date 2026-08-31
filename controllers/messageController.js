@@ -193,6 +193,49 @@ const buildThreadSummary = async (application, actor) => {
   return buildThreadSummaryFromMeta(application, actor, lastMessage, unreadCount);
 };
 
+const getOfferStatusMessageBody = (application) => {
+  const jobTitle = application.job?.jobTitle || 'Job';
+  const offerStatus = application.selectionDetails?.offerStatus || 'Selected';
+
+  if (offerStatus === 'Hired') {
+    return `Congratulations! You have been marked as hired for the "${jobTitle}" position.`;
+  }
+  if (offerStatus === 'Offer Accepted') {
+    return `Your offer response for the "${jobTitle}" position has been recorded as accepted.`;
+  }
+  if (offerStatus === 'Offer Declined') {
+    return `Your offer response for the "${jobTitle}" position has been recorded as declined.`;
+  }
+  if (offerStatus === 'Selected') {
+    return `Congratulations! You have been selected for interview for the "${jobTitle}" position.`;
+  }
+
+  return `You received a job offer for the "${jobTitle}" position. You can view the offer and respond from your application tracker.`;
+};
+
+const ensureOfferStatusMessage = async (application) => {
+  if (application.status !== 'Offered') return;
+
+  const body = getOfferStatusMessageBody(application);
+  const existing = await Message.findOne({
+    application: application._id,
+    senderRole: 'employer',
+    body
+  }).select('_id').lean();
+
+  if (existing) return;
+
+  await Message.create({
+    application: application._id,
+    job: application.job._id,
+    employer: application.job.login,
+    candidate: application.candidate._id,
+    sender: application.job.login,
+    senderRole: 'employer',
+    body
+  });
+};
+
 const buildThreadSummaries = async (applications, actor) => {
   const applicationIds = applications.map(app => app._id).filter(Boolean);
   if (!applicationIds.length) return [];
@@ -272,6 +315,8 @@ const getThread = (actor) => async (req, res) => {
     if (!application) {
       return res.status(404).json({ message: 'Conversation not found.' });
     }
+
+    await ensureOfferStatusMessage(application);
 
     await Message.updateMany({
       application: application._id,
@@ -397,7 +442,9 @@ const sendMessage = (actor) => async (req, res) => {
         title: 'New Chat Message',
         message: `You received a new message from ${senderName}: "${(body || attachment?.originalName || 'Attachment').slice(0, 80)}"`,
         type: 'general',
-        redirectUrl: actor === 'employer' ? `/jobseeker/messages` : `/employer/messages`
+        redirectUrl: actor === 'employer'
+          ? `/jobseeker/messages?application=${application._id}`
+          : `/employer/messages?application=${application._id}`
       }).catch(err => console.error('Failed to send notification for new message:', err));
     }
 
@@ -454,7 +501,17 @@ const sendStatusUpdateMessage = async (applicationId, status, employerUserId) =>
     const jobTitle = application.job.jobTitle || 'Job';
     let body = `Your application for the "${jobTitle}" position has been updated. Current status: ${status}.`;
 
-    if ((status === 'Interview' || status === 'Interview Scheduled') && application.interviewDetails && application.interviewDetails.date) {
+    if (status === 'Offered') {
+      body = `Congratulations! You have been selected for interview for the "${jobTitle}" position.`;
+    } else if (status === 'Offer Sent') {
+      body = `You received a job offer for the "${jobTitle}" position. You can view the offer and respond from your application tracker.`;
+    } else if (status === 'Offer Accepted') {
+      body = `Your offer response for the "${jobTitle}" position has been recorded as accepted.`;
+    } else if (status === 'Offer Declined') {
+      body = `Your offer response for the "${jobTitle}" position has been recorded as declined.`;
+    } else if (status === 'Hired') {
+      body = `Congratulations! You have been marked as hired for the "${jobTitle}" position.`;
+    } else if ((status === 'Interview' || status === 'Interview Scheduled') && application.interviewDetails && application.interviewDetails.date) {
       const details = application.interviewDetails;
       const formattedDate = new Date(details.date).toLocaleDateString('en-IN', {
         day: 'numeric',
@@ -498,6 +555,47 @@ const sendStatusUpdateMessage = async (applicationId, status, employerUserId) =>
     });
 
     const recipientUserId = application.candidate.userId?._id || application.candidate.userId;
+    const { createAndSendNotification } = require('../utils/jobNotifications');
+
+    if (recipientUserId) {
+      const title = status === 'Offered'
+        ? 'Selected for Interview'
+        : status === 'Offer Sent'
+          ? 'Offer Received'
+          : status === 'Hired'
+          ? 'You Are Hired'
+          : status === 'Offer Accepted'
+            ? 'Offer Accepted'
+            : status === 'Offer Declined'
+              ? 'Offer Declined'
+              : 'Application Status Updated';
+
+      let filter = 'all';
+      if (status) {
+        const s = status.toLowerCase();
+        if (s === 'offered') filter = 'selected';
+        else if (s === 'offer sent') filter = 'offered';
+        else if (s === 'offer accepted') filter = 'offered';
+        else if (s === 'offer declined') filter = 'rejected';
+        else if (s.includes('interview') && s.includes('hold')) filter = 'onhold';
+        else if (s.includes('interview')) filter = 'interview';
+        else if (s.includes('select')) filter = 'selected';
+        else if (s.includes('offer')) filter = 'offered';
+        else if (s.includes('hire')) filter = 'hired';
+        else if (s.includes('reject')) filter = 'rejected';
+        else if (s.includes('shortlist')) filter = 'shortlisted';
+        else if (s.includes('review')) filter = 'reviewed';
+        else if (s.includes('apply') || s.includes('pending')) filter = 'applied';
+      }
+
+      createAndSendNotification({
+        recipientId: recipientUserId,
+        title,
+        message: body,
+        type: 'application_status',
+        redirectUrl: `/jobseeker/jobs-applied?filter=${filter}`
+      }).catch(err => console.error('Failed to send status notification:', err));
+    }
 
     const io = getIO();
     if (io) {

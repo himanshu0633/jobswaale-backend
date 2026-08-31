@@ -13,6 +13,8 @@ const PlanMapping = require('../models/PlanMapping');
 const Feature = require('../models/Feature');
 const Employer = require('../models/Employer');
 const Attachment = require('../models/Attachment');
+const SentOffer = require('../models/SentOffer');
+const Message = require('../models/Message');
 const { findDuplicateMobile, validateMobileNumber } = require('../utils/userCredentials');
 
 const GOOGLE_PROFILE_DUMMY_VALUES = {
@@ -362,7 +364,25 @@ exports.getJobseekerDashboard = async (req, res) => {
     const shortlistedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Shortlisted' });
     const interviewsCount = await Application.countDocuments({ candidate: seeker._id, status: 'Interview', 'interviewDetails.onHold': { $ne: true } });
     const onHoldCount = await Application.countDocuments({ candidate: seeker._id, status: 'Interview', 'interviewDetails.onHold': true });
-    const offeredCount = await Application.countDocuments({ candidate: seeker._id, status: 'Offered' });
+    const selectedCount = await Application.countDocuments({
+      candidate: seeker._id,
+      status: 'Offered',
+      $or: [
+        { 'selectionDetails.offerStatus': 'Selected' },
+        { 'selectionDetails.offerStatus': { $exists: false } },
+        { 'selectionDetails.offerStatus': null }
+      ]
+    });
+    const offeredCount = await Application.countDocuments({
+      candidate: seeker._id,
+      status: 'Offered',
+      'selectionDetails.offerStatus': { $in: ['Offer Sent', 'Offer Accepted'] }
+    });
+    const hiredCount = await Application.countDocuments({
+      candidate: seeker._id,
+      status: 'Offered',
+      'selectionDetails.offerStatus': 'Hired'
+    });
     const rejectedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Rejected' });
     
     // Recent activities (applications)
@@ -389,6 +409,8 @@ exports.getJobseekerDashboard = async (req, res) => {
         type = 'accepted';
         if (app.selectionDetails?.offerStatus === 'Selected') {
           text = `You were selected for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+        } else if (app.selectionDetails?.offerStatus === 'Hired') {
+          text = `You were hired for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
         } else {
           text = `You received a job offer for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
         }
@@ -425,7 +447,16 @@ exports.getJobseekerDashboard = async (req, res) => {
       await j.save();
     }
 
-    const recommendedJobsRaw = await Job.find({ status: 'active', isDeleted: { $ne: true } })
+    const recommendedJobsRaw = await Job.find({
+      status: { $in: ['active', 'featured'] },
+      publishStatus: 'publish',
+      isDeleted: { $ne: true },
+      $or: [
+        { jobExpiry: { $exists: false } },
+        { jobExpiry: null },
+        { jobExpiry: { $gt: new Date() } }
+      ]
+    })
       .populate('jobType', 'jobType')
       .populate('jobCategory', 'categoryName')
       .limit(3)
@@ -458,7 +489,9 @@ exports.getJobseekerDashboard = async (req, res) => {
         shortlisted: { value: shortlistedCount, change: 'Moving forward' },
         interviews: { value: interviewsCount, change: 'Scheduled sessions' },
         onHold: { value: onHoldCount, change: 'Kept on hold' },
-        offered: { value: offeredCount, change: 'Selected / Offered' },
+        selected: { value: selectedCount, change: 'Selected by employer' },
+        offered: { value: offeredCount, change: 'Offer received' },
+        hired: { value: hiredCount, change: 'Hiring completed' },
         rejected: { value: rejectedCount, change: 'Not selected' },
         profileViews: { value: 15 + Math.floor(Math.random() * 20), change: '+3 this week' } // realistic mock views
       },
@@ -812,12 +845,32 @@ exports.getJobseekerApplications = async (req, res) => {
       .sort({ appliedDate: -1, createDate: -1 })
       .lean();
 
+    const applicationIds = applications.map((app) => app._id);
+    const sentOffers = await SentOffer.find({
+      candidate: seeker._id,
+      application: { $in: applicationIds }
+    }).sort({ createDate: -1 }).lean();
+    const latestOfferByApplication = new Map();
+    sentOffers.forEach((offer) => {
+      const key = String(offer.application);
+      if (!latestOfferByApplication.has(key)) {
+        latestOfferByApplication.set(key, offer);
+      }
+    });
+    const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+    const protocol = forwardedProto || req.protocol || 'https';
+    const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
+
     const mapped = applications.map((app, index) => {
       const job = app.job;
       if (!job) return null;
       
       const tones = ['bg-[#0d6efd] text-white', 'bg-[#198754] text-white', 'bg-[#ffc107] text-[#212529]', 'bg-[#dc3545] text-white'];
       const appliedDate = app.appliedDate || app.createDate || new Date();
+      const latestOffer = latestOfferByApplication.get(String(app._id));
+      const offerAttachmentUrl = latestOffer?.attachmentUrl
+        ? `${publicOrigin.replace(/\/+$/, '')}/${String(latestOffer.attachmentUrl).replace(/^\/+/, '')}`
+        : '';
 
       return {
         id: app._id,
@@ -833,7 +886,15 @@ exports.getJobseekerApplications = async (req, res) => {
         appliedDate,
         status: (app.status === 'Interview' && app.interviewDetails?.onHold) ? 'onhold' : String(app.status || 'Applied').toLowerCase(),
         interviewDetails: app.interviewDetails || null,
-        selectionDetails: app.selectionDetails || null
+        selectionDetails: app.selectionDetails || null,
+        offerLetter: latestOffer ? {
+          id: latestOffer._id,
+          subject: latestOffer.subject || '',
+          message: latestOffer.message || '',
+          attachmentUrl: offerAttachmentUrl,
+          attachmentName: latestOffer.attachmentName || '',
+          sentAt: latestOffer.createDate || null
+        } : null
       };
     }).filter(Boolean);
 
@@ -866,6 +927,17 @@ exports.getJobseekerApplicationDetail = async (req, res) => {
 
     const job = application.job;
     const appliedDate = application.appliedDate || application.createDate || new Date();
+    const latestOffer = await SentOffer.findOne({
+      application: application._id,
+      candidate: seeker._id
+    }).sort({ createDate: -1 }).lean();
+
+    const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+    const protocol = forwardedProto || req.protocol || 'https';
+    const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
+    const offerAttachmentUrl = latestOffer?.attachmentUrl
+      ? `${publicOrigin.replace(/\/+$/, '')}/${String(latestOffer.attachmentUrl).replace(/^\/+/, '')}`
+      : '';
 
     res.json({
       id: application._id,
@@ -882,6 +954,14 @@ exports.getJobseekerApplicationDetail = async (req, res) => {
       shortlistedDate: application.shortlistedDate || null,
       interviewDetails: application.interviewDetails || null,
       selectionDetails: application.selectionDetails || null,
+      offerLetter: latestOffer ? {
+        id: latestOffer._id,
+        subject: latestOffer.subject || '',
+        message: latestOffer.message || '',
+        attachmentUrl: offerAttachmentUrl,
+        attachmentName: latestOffer.attachmentName || '',
+        sentAt: latestOffer.createDate || null
+      } : null,
       rejectedDate: String(application.status || '').toLowerCase() === 'rejected'
         ? (application.updateDate || application.createDate || appliedDate)
         : null
@@ -1186,14 +1266,17 @@ exports.respondToOffer = async (req, res) => {
     }
 
     const Application = require('../models/Application');
-    const application = await Application.findById(applicationId);
+    const application = await Application.findById(applicationId)
+      .populate('job', 'login jobTitle')
+      .populate('candidate', 'name userId');
     if (!application) {
       return res.status(404).json({ message: 'Application not found.' });
     }
 
     const Jobseeker = require('../models/Jobseeker');
     const seeker = await Jobseeker.findOne({ userId: req.user._id });
-    if (!seeker || String(application.candidate) !== String(seeker._id)) {
+    const applicationCandidateId = application.candidate?._id || application.candidate;
+    if (!seeker || String(applicationCandidateId) !== String(seeker._id)) {
       return res.status(403).json({ message: 'You are not authorized to respond to this offer.' });
     }
 
@@ -1225,6 +1308,27 @@ exports.respondToOffer = async (req, res) => {
     }
 
     await application.save();
+
+    try {
+      const jobTitle = application.job?.jobTitle || 'the position';
+      const responseText = response === 'accept'
+        ? `I have accepted the offer for "${jobTitle}".`
+        : response === 'decline'
+          ? `I have rejected the offer for "${jobTitle}".`
+          : `I requested changes for the offer for "${jobTitle}".`;
+      await Message.create({
+        application: application._id,
+        job: application.job?._id || application.job,
+        employer: application.job?.login,
+        candidate: seeker._id,
+        sender: req.user._id,
+        senderRole: 'jobseeker',
+        body: responseText
+      });
+    } catch (err) {
+      console.error('Error sending offer response chat message:', err);
+    }
+
     res.json({ message: `Offer response '${response}' recorded successfully.`, application });
   } catch (error) {
     console.error('Respond to Offer Error:', error);

@@ -6,6 +6,16 @@ const { sendAdminNotification } = require('../utils/mail');
 const Application = require('../models/Application');
 const Jobseeker = require('../models/Jobseeker');
 
+const getPublicJobConstraints = () => ({
+  status: { $in: ['active', 'featured'] },
+  publishStatus: 'publish',
+  $or: [
+    { jobExpiry: { $exists: false } },
+    { jobExpiry: null },
+    { jobExpiry: { $gt: new Date() } }
+  ]
+});
+
 exports.getJobs = async (req, res) => {
   try {
     const jwt = require('jsonwebtoken');
@@ -28,18 +38,8 @@ exports.getJobs = async (req, res) => {
 
     const filter = { isDeleted: { $ne: true } };
     if (!isAdmin) {
-      filter.status = { $in: ['active', 'featured'] };
-      if (!req.query.employer) {
-        const now = new Date();
-        filter.$and = filter.$and || [];
-        filter.$and.push({
-          $or: [
-            { jobExpiry: { $exists: false } },
-            { jobExpiry: null },
-            { jobExpiry: { $gt: now } }
-          ]
-        });
-      }
+      filter.$and = filter.$and || [];
+      filter.$and.push(getPublicJobConstraints());
     }
     if (req.query.employer) {
       if (!mongoose.Types.ObjectId.isValid(req.query.employer)) {
@@ -467,8 +467,8 @@ exports.getJobById = async (req, res) => {
       return res.status(404).json({ message: 'Job not found' });
     }
 
+    let isAdmin = false;
     if (req.query.raw === '1') {
-      let isAdmin = false;
       const authHeader = req.headers.authorization;
       if (authHeader && authHeader.startsWith('Bearer ')) {
         try {
@@ -484,6 +484,15 @@ exports.getJobById = async (req, res) => {
       if (isAdmin) {
         return res.json({ job: jobDoc });
       }
+    }
+
+    const now = new Date();
+    const isPubliclyVisible =
+      ['active', 'featured'].includes(String(jobDoc.status || '').toLowerCase()) &&
+      jobDoc.publishStatus === 'publish' &&
+      (!jobDoc.jobExpiry || new Date(jobDoc.jobExpiry) > now);
+    if (!isPubliclyVisible) {
+      return res.status(404).json({ message: 'Job not found' });
     }
 
     const descParas = typeof jobDoc.description === 'string'
@@ -679,9 +688,15 @@ exports.applyJob = async (req, res) => {
       ? { $or: [{ _id: id }, { slug: id }], isDeleted: { $ne: true } }
       : { slug: id, isDeleted: { $ne: true } };
 
-    const job = await Job.findOne(query);
+    const job = await Job.findOne({
+      isDeleted: { $ne: true },
+      $and: [
+        query,
+        getPublicJobConstraints()
+      ]
+    });
     if (!job) {
-      return res.status(404).json({ message: 'Job not found' });
+      return res.status(404).json({ message: 'Job is not available for applications' });
     }
 
     const existing = await Application.findOne({ job: job._id, candidate: seeker._id });

@@ -174,16 +174,38 @@ const sendEmployerNewApplicationEmail = async ({ to, employerName, jobTitle, can
 };
 
 const sendApplicationStatusEmail = async ({ to, seekerName, jobTitle, companyName, status, recipientId }) => {
-  const message = `Your job application for "${jobTitle}" at "${companyName}" has been updated to "${status}".`;
+  const isSelected = status === 'Selected';
+  const message = isSelected
+    ? `Congratulations! You have been selected for interview for "${jobTitle}" at "${companyName}".`
+    : `Your job application for "${jobTitle}" at "${companyName}" has been updated to "${status}".`;
+  const title = isSelected ? 'Selected for Interview' : 'Application Status Updated';
+
+  let filter = 'all';
+  if (status) {
+    const s = status.toLowerCase();
+    if (s === 'offered') filter = 'selected';
+    else if (s === 'offer sent') filter = 'offered';
+    else if (s === 'offer accepted') filter = 'offered';
+    else if (s === 'offer declined') filter = 'rejected';
+    else if (s.includes('interview') && s.includes('hold')) filter = 'onhold';
+    else if (s.includes('interview')) filter = 'interview';
+    else if (s.includes('select')) filter = 'selected';
+    else if (s.includes('offer')) filter = 'offered';
+    else if (s.includes('hire')) filter = 'hired';
+    else if (s.includes('reject')) filter = 'rejected';
+    else if (s.includes('shortlist')) filter = 'shortlisted';
+    else if (s.includes('review')) filter = 'reviewed';
+    else if (s.includes('apply') || s.includes('pending')) filter = 'applied';
+  }
 
   // 1. In-App
   if (recipientId) {
     await createAndSendNotification({
       recipientId,
-      title: 'Application Status Updated',
+      title,
       message,
       type: 'application_status',
-      redirectUrl: '/jobseeker/applications'
+      redirectUrl: `/jobseeker/jobs-applied?filter=${filter}`
     });
   }
 
@@ -195,7 +217,7 @@ const sendApplicationStatusEmail = async ({ to, seekerName, jobTitle, companyNam
     await transporter.sendMail({
       from: getMailFrom(settings),
       to,
-      subject: `Application status updated for ${jobTitle}`,
+      subject: isSelected ? `Selected for interview: ${jobTitle}` : `Application status updated for ${jobTitle}`,
       html: `
         <div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.5;">
           <h2 style="color:#0f172a;margin:0 0 16px;">Application Status Update</h2>
@@ -203,7 +225,7 @@ const sendApplicationStatusEmail = async ({ to, seekerName, jobTitle, companyNam
           <p>${escapeHtml(message)}</p>
           <p>Please log in to your dashboard to check further details or instructions.</p>
           <p style="margin-top:24px;">
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/jobseeker/applications" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">View My Applications</a>
+            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/jobseeker/jobs-applied?filter=${filter}" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">View My Applications</a>
           </p>
         </div>
       `

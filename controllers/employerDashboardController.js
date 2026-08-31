@@ -33,6 +33,33 @@ const formatDate = (value) => {
   return new Date(value).toISOString();
 };
 
+const resumeMimeTypeByExt = {
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+};
+
+const getResumeDownloadName = (resumePath = '', candidateName = 'candidate') => {
+  const filename = path.basename(String(resumePath).split('?')[0]);
+  const ext = path.extname(filename).toLowerCase();
+  if (filename && ext) return filename;
+
+  const safeName = String(candidateName || 'candidate')
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'candidate';
+  return `${safeName}-resume.pdf`;
+};
+
+const setResumeDownloadHeaders = (res, downloadName, mimeType, size) => {
+  const ext = path.extname(downloadName).toLowerCase();
+  const contentType = resumeMimeTypeByExt[ext] || mimeType || 'application/octet-stream';
+  res.setHeader('Content-Type', contentType);
+  if (size) res.setHeader('Content-Length', size);
+  res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length, X-Remaining-Unlocks, X-Is-New-Unlock');
+};
+
 const checkEmployerPlanAccess = async (userId, candidateId = null) => {
   try {
     const employer = await Employer.findOne({
@@ -833,7 +860,11 @@ exports.getEmployerApplications = async (req, res) => {
     const query = req.query || {};
 
     const jobs = await ensureApplicationsExist(userId);
-    const jobIds = jobs.map(j => j._id);
+    const requestedJobId = String(query.jobId || '').trim();
+    const scopedJobs = requestedJobId
+      ? jobs.filter(job => String(job._id) === requestedJobId)
+      : jobs;
+    const jobIds = scopedJobs.map(j => j._id);
 
     // Clean up any stale interview/selection details for pre-interview applications
     await Application.updateMany(
@@ -985,7 +1016,7 @@ exports.getEmployerApplications = async (req, res) => {
         rejected: statusCounts.Rejected || 0
       },
       filters: {
-        jobTitles: [...new Set(jobs.map(job => job.jobTitle).filter(Boolean))],
+        jobTitles: [...new Set(scopedJobs.map(job => job.jobTitle).filter(Boolean))],
         experiences: [...new Set(applicationsPreStatusFilter.map(item => item.experience).filter(Boolean))]
       },
       applications: items,
@@ -1272,18 +1303,24 @@ exports.downloadCandidateResume = async (req, res) => {
       return res.status(404).json({ message: 'Resume was not found for this candidate.' });
     }
 
-    const filename = path.basename(candidate.resume);
+    const filename = path.basename(String(candidate.resume).split('?')[0]);
+    const downloadName = getResumeDownloadName(candidate.resume, candidate.name);
     const attachment = await Attachment.findOne({ filename });
     if (attachment) {
-      res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
-      res.setHeader('Content-Length', attachment.size || attachment.data.length);
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      setResumeDownloadHeaders(res, downloadName, attachment.mimeType, attachment.size || attachment.data.length);
       return res.send(attachment.data);
     }
 
-    const localPath = path.join(__dirname, '..', candidate.resume.replace(/^\/+/, ''));
+    let resumePathname = String(candidate.resume || '');
+    try {
+      resumePathname = new URL(resumePathname).pathname;
+    } catch {
+      resumePathname = resumePathname.replace(/^\/+/, '');
+    }
+    const localPath = path.join(__dirname, '..', resumePathname.replace(/^\/+/, ''));
     if (fs.existsSync(localPath)) {
-      return res.download(localPath, filename);
+      setResumeDownloadHeaders(res, downloadName, resumeMimeTypeByExt[path.extname(downloadName).toLowerCase()], fs.statSync(localPath).size);
+      return res.download(localPath, downloadName);
     }
 
     return res.status(404).json({ message: 'Resume file could not be found.' });
@@ -1298,10 +1335,18 @@ exports.getEmployerInterviews = async (req, res) => {
     const query = req.query || {};
 
     const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
-      .select('_id jobTitle jobType contactPerson')
+      .select('_id jobTitle jobType contactPerson status')
       .populate('jobType', 'jobType')
       .lean();
-    const jobIds = jobs.map(job => job._id);
+    const requestedJobId = String(query.jobId || '').trim();
+    const activityFilter = String(query.applicationActivity || 'active').toLowerCase();
+    const scopedJobs = requestedJobId
+      ? jobs.filter(job => String(job._id) === requestedJobId)
+      : jobs.filter(job => {
+          const isActiveJob = ['active', 'featured'].includes(String(job.status || '').toLowerCase());
+          return activityFilter === 'both' || (activityFilter === 'inactive' ? !isActiveJob : isActiveJob);
+        });
+    const jobIds = scopedJobs.map(job => job._id);
 
     if (!jobIds.length) {
       return res.json({
@@ -1410,7 +1455,7 @@ exports.getEmployerInterviews = async (req, res) => {
     res.json({
       stats,
       filters: {
-        jobTitles: [...new Set(interviews.map(item => item.jobTitle).filter(Boolean))],
+        jobTitles: [...new Set(scopedJobs.map(item => item.jobTitle).filter(Boolean))],
         types: [...new Set(interviews.map(item => item.type).filter(Boolean))]
       },
       interviews: items,
@@ -1427,10 +1472,18 @@ exports.getEmployerSelected = async (req, res) => {
     const query = req.query || {};
 
     const jobs = await Job.find({ login: userId, isDeleted: { $ne: true } })
-      .select('_id jobTitle jobType minSalary maxSalary salary salaryUnit')
+      .select('_id jobTitle jobType minSalary maxSalary salary salaryUnit status')
       .populate('jobType', 'jobType')
       .lean();
-    const jobIds = jobs.map(job => job._id);
+    const requestedJobId = String(query.jobId || '').trim();
+    const activityFilter = String(query.applicationActivity || 'active').toLowerCase();
+    const scopedJobs = requestedJobId
+      ? jobs.filter(job => String(job._id) === requestedJobId)
+      : jobs.filter(job => {
+          const isActiveJob = ['active', 'featured'].includes(String(job.status || '').toLowerCase());
+          return activityFilter === 'both' || (activityFilter === 'inactive' ? !isActiveJob : isActiveJob);
+        });
+    const jobIds = scopedJobs.map(job => job._id);
 
     if (!jobIds.length) {
       return res.json({
@@ -1480,7 +1533,6 @@ exports.getEmployerSelected = async (req, res) => {
 
       const details = app.selectionDetails || {};
       const offerStatus = details.offerStatus || 'Selected';
-      if (offerStatus !== 'Selected') return null;
 
       const selectedDate = details.selectedDate || app.updateDate || app.appliedDate;
       const salaryLpa = getSalaryLpa(app);
@@ -1491,6 +1543,7 @@ exports.getEmployerSelected = async (req, res) => {
         candidateId: candidate._id,
         jobId: job._id,
         name: candidate.name,
+        status: 'Offered',
         email: showContacts ? (candidate.userId?.email || '') : 'Hidden (Upgrade Plan)',
         phone: showContacts ? (candidate.phone || '') : 'Hidden (Upgrade Plan)',
         location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
@@ -1543,7 +1596,7 @@ exports.getEmployerSelected = async (req, res) => {
     res.json({
       stats,
       filters: {
-        jobTitles: [...new Set(selectedRows.map(item => item.jobTitle).filter(Boolean))]
+        jobTitles: [...new Set(scopedJobs.map(item => item.jobTitle).filter(Boolean))]
       },
       selected: items,
       pagination
@@ -1902,6 +1955,8 @@ exports.getEmployerJobDetails = async (req, res) => {
     let interviews = 0;
     let onHold = 0;
     let selected = 0;
+    let offered = 0;
+    let hired = 0;
     let rejected = 0;
     let matchScoreTotal = 0;
     let matchScoreCount = 0;
@@ -1921,7 +1976,13 @@ exports.getEmployerJobDetails = async (req, res) => {
       if (logicalStatus === 'Rejected') {
         rejected += 1;
       } else if (logicalStatus === 'Offered' || logicalStatus === 'Hired') {
-        selected += 1;
+        if (app.selectionDetails?.offerStatus === 'Selected') {
+          selected += 1;
+        } else if (app.selectionDetails?.offerStatus === 'Hired') {
+          hired += 1;
+        } else {
+          offered += 1;
+        }
       } else if (logicalStatus === 'Interview') {
         interviews += 1;
       } else if (logicalStatus === 'OnHold') {
@@ -2021,6 +2082,8 @@ exports.getEmployerJobDetails = async (req, res) => {
         interviews,
         onHold,
         selected,
+        offered,
+        hired,
         rejected,
         averageMatchScore
       },
@@ -2109,6 +2172,7 @@ exports.getEmployerDashboard = async (req, res) => {
       shortlistedCount,
       selectedCount,
       offeredCount,
+      hiredCount,
       interviewCount,
       reviewCount,
       rejectedCount,
@@ -2118,7 +2182,8 @@ exports.getEmployerDashboard = async (req, res) => {
       Application.countDocuments({ job: { $in: jobIds }, status: 'Applied' }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Shortlisted' }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Offered', 'selectionDetails.offerStatus': 'Selected' }),
-      Application.countDocuments({ job: { $in: jobIds }, status: 'Offered', 'selectionDetails.offerStatus': { $ne: 'Selected' } }),
+      Application.countDocuments({ job: { $in: jobIds }, status: 'Offered', 'selectionDetails.offerStatus': { $in: ['Offer Sent', 'Offer Accepted'] } }),
+      Application.countDocuments({ job: { $in: jobIds }, status: 'Offered', 'selectionDetails.offerStatus': 'Hired' }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Interview', 'interviewDetails.onHold': { $ne: true } }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Reviewed' }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Rejected' }),
@@ -2138,7 +2203,7 @@ exports.getEmployerDashboard = async (req, res) => {
       const offerStatus = item._id.offerStatus;
       const onHold = item._id.onHold === true;
       if (!countMap[jobId]) {
-        countMap[jobId] = { total: 0, applied: 0, reviewed: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, rejected: 0 };
+        countMap[jobId] = { total: 0, applied: 0, reviewed: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, hired: 0, rejected: 0 };
       }
       countMap[jobId].total += item.count;
       if (status === 'Applied') countMap[jobId].applied += item.count;
@@ -2154,6 +2219,8 @@ exports.getEmployerDashboard = async (req, res) => {
       if (status === 'Offered') {
         if (offerStatus === 'Selected') {
           countMap[jobId].selected += item.count;
+        } else if (offerStatus === 'Hired') {
+          countMap[jobId].hired += item.count;
         } else {
           countMap[jobId].offered += item.count;
         }
@@ -2194,7 +2261,7 @@ exports.getEmployerDashboard = async (req, res) => {
     const activeJobRows = allJobs
       .filter(job => ['Active', 'Expired'].includes(getJobDisplayStatus(job)))
       .map(job => {
-        const jCounts = countMap[String(job._id)] || { total: 0, applied: 0, reviewed: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, rejected: 0 };
+        const jCounts = countMap[String(job._id)] || { total: 0, applied: 0, reviewed: 0, shortlisted: 0, interview: 0, onHold: 0, selected: 0, offered: 0, hired: 0, rejected: 0 };
         return {
           id: job._id,
           title: job.jobTitle,
@@ -2209,6 +2276,7 @@ exports.getEmployerDashboard = async (req, res) => {
           onHold: jCounts.onHold,
           selected: jCounts.selected,
           offered: jCounts.offered,
+          hired: jCounts.hired,
           rejected: jCounts.rejected,
           postedAt: formatDate(job.createDate || job.postingDate)
         };
@@ -2251,6 +2319,7 @@ exports.getEmployerDashboard = async (req, res) => {
         onHold: onHoldCount,
         selected: selectedCount,
         offered: offeredCount,
+        hired: hiredCount,
         rejected: rejectedCount,
         expired: expiredJobs.length
       },
@@ -2263,6 +2332,7 @@ exports.getEmployerDashboard = async (req, res) => {
         onHold: onHoldCount,
         selected: selectedCount,
         offered: offeredCount,
+        hired: hiredCount,
         rejected: rejectedCount,
         expired: expiredJobs.length
       },
@@ -3438,6 +3508,16 @@ exports.updateSelectedOffer = async (req, res) => {
 
     await application.save();
 
+    // Send offer status update message to chat thread
+    const { sendStatusUpdateMessage } = require('./messageController');
+    (async () => {
+      try {
+        await sendStatusUpdateMessage(application._id, offerStatus, req.user._id);
+      } catch (err) {
+        console.error('Error sending chat offer status update message:', err);
+      }
+    })();
+
     // Send application status update email to jobseeker
     const { sendApplicationStatusEmail } = require('../utils/jobNotifications');
     (async () => {
@@ -4164,7 +4244,16 @@ exports.getSentOffers = async (req, res) => {
 exports.sendOfferLetter = async (req, res) => {
   try {
     const { id } = req.params;
-    const { subject, message, saveAsTemplate, templateName } = req.body;
+    const {
+      subject,
+      message,
+      saveAsTemplate,
+      templateName,
+      salaryOffered,
+      joiningDate,
+      employmentType,
+      notes
+    } = req.body;
 
     if (!subject || !message) {
       return res.status(400).json({ message: 'Subject and message are required.' });
@@ -4243,11 +4332,13 @@ exports.sendOfferLetter = async (req, res) => {
       selectedDate: currentDetails.selectedDate || new Date(),
       interviewScore: currentDetails.interviewScore ?? application.matchScore ?? null,
       offerStatus: 'Offer Sent',
-      salaryOffered: currentDetails.salaryOffered ?? application.job?.maxSalary ?? application.job?.minSalary ?? null,
+      salaryOffered: salaryOffered !== undefined && salaryOffered !== ''
+        ? Number(salaryOffered)
+        : (currentDetails.salaryOffered ?? application.job?.maxSalary ?? application.job?.minSalary ?? null),
       offerSentAt: new Date(),
-      joiningDate: currentDetails.joiningDate,
-      employmentType: currentDetails.employmentType || '',
-      notes: currentDetails.notes || '',
+      joiningDate: joiningDate ? new Date(joiningDate) : currentDetails.joiningDate,
+      employmentType: employmentType ?? currentDetails.employmentType ?? '',
+      notes: notes ?? currentDetails.notes ?? '',
       offerRespondedAt: null,
       hiredAt: null
     };
@@ -4290,7 +4381,7 @@ exports.sendOfferLetter = async (req, res) => {
     // Send chat message update
     const { sendStatusUpdateMessage } = require('./messageController');
     try {
-      await sendStatusUpdateMessage(application._id, 'Offered', req.user._id);
+      await sendStatusUpdateMessage(application._id, 'Offer Sent', req.user._id);
     } catch (err) {
       console.error('Error sending chat status update message:', err);
     }
