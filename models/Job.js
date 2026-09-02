@@ -179,7 +179,7 @@ const JobSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['active', 'inactive', 'closed', 'pending', 'reviewed', 'featured', 'blacklist'],
-    default: 'active'
+    default: 'inactive'
   },
   blacklistReason: {
     type: String,

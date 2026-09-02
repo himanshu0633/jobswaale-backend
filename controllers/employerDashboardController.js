@@ -536,8 +536,8 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
 
 const getJobDisplayStatus = (job) => {
   if (job.publishStatus === 'draft' || job.status === 'pending') return 'Draft';
-  if (job.status === 'inactive') return 'Paused';
-  if (job.status === 'closed') return 'Closed';
+  if (job.status === 'closed' || job.status === 'paused') return 'Closed';
+  if (job.status === 'inactive') return 'Inactive';
   const remainingDays = daysFromToday(job.jobExpiry);
   if (remainingDays !== null && remainingDays < 0) return 'Expired';
   return 'Active';
@@ -652,10 +652,11 @@ exports.getEmployerJobs = async (req, res) => {
     res.json({
       stats: {
         active: mappedJobs.filter(job => job.status === 'Active').length,
+        inactive: mappedJobs.filter(job => job.status === 'Inactive').length,
         draft: mappedJobs.filter(job => job.status === 'Draft').length,
         expiring: 0,
         expired: mappedJobs.filter(job => job.status === 'Expired').length,
-        closed: mappedJobs.filter(job => job.status === 'Closed' || job.status === 'Paused').length
+        closed: mappedJobs.filter(job => job.status === 'Closed').length
       },
       filters: {
         locations: [...new Set(mappedJobs.flatMap(job => job.location.split(',').map(item => item.trim()).filter(Boolean)))],
@@ -2458,6 +2459,7 @@ exports.getEmployerDashboard = async (req, res) => {
     const jobStats = {
       total: allJobs.length,
       active: allJobs.filter(job => getJobDisplayStatus(job) === 'Active').length,
+      inactive: allJobs.filter(job => getJobDisplayStatus(job) === 'Inactive').length,
       draft: allJobs.filter(job => getJobDisplayStatus(job) === 'Draft').length,
       expired: expiredJobs.length,
       closed: allJobs.filter(job => ['Closed', 'Paused'].includes(getJobDisplayStatus(job))).length
@@ -3325,7 +3327,7 @@ exports.updateEmployerJob = async (req, res) => {
         phone: phone || employer?.phone || req.user.phone || existingJob.phone || 'N/A',
         currentPlan: currentPlan || employer?.currentPlan || existingJob.currentPlan || null,
         planValidity: planValidity || jobExpiry || employer?.planValidity || existingJob.planValidity || null,
-        status: finalPublishStatus === 'draft' ? 'pending' : 'active',
+        status: finalPublishStatus === 'draft' ? 'pending' : (status || existingJob.status || 'inactive'),
         updatedLogin: userId
       },
       { new: true }
@@ -3385,16 +3387,12 @@ exports.updateEmployerJobAction = async (req, res) => {
       return res.status(400).json({ message: 'Invalid job action.' });
     }
 
-    if (action === 'pause') {
-      job.status = 'inactive';
-    }
-
-    if (action === 'close') {
+    if (action === 'pause' || action === 'close') {
       job.status = 'closed';
     }
 
     if (action === 'reopen' || action === 'publish') {
-      job.status = 'active';
+      job.status = 'inactive';
       job.publishStatus = 'publish';
     }
 
@@ -3557,7 +3555,7 @@ exports.createEmployerJob = async (req, res) => {
       phone: phone || employer?.phone || req.user.phone || 'N/A',
       currentPlan: currentPlan || employer?.currentPlan || req.user.selectedPlan || null,
       planValidity: planValidity || jobExpiry || employer?.planValidity || null,
-      status: finalPublishStatus === 'draft' ? 'pending' : 'active',
+      status: finalPublishStatus === 'draft' ? 'pending' : 'inactive',
       ip: req.clientIp || '127.0.0.1',
       login: userId
     });
@@ -3567,7 +3565,11 @@ exports.createEmployerJob = async (req, res) => {
       job: job.toObject()
     });
 
-    res.status(201).json({ message: 'Job published successfully.', job, autoMail });
+    res.status(201).json({
+      message: finalPublishStatus === 'draft' ? 'Draft saved successfully.' : 'Job posted successfully. It will be activated after admin review.',
+      job,
+      autoMail
+    });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
