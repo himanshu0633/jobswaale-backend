@@ -190,6 +190,7 @@ exports.getDashboardStats = async (req, res) => {
       jobseekers: jobseekersCount + publicJobseekersCount,
       jobsPosted: jobsCount,
       activeJobs: activeJobsCount,
+      inactiveJobs: Math.max(jobsCount - activeJobsCount, 0),
       totalUsers: jobseekersCount + publicJobseekersCount,
       activeUsers: activeJobseekersCount + activePublicJobseekersCount,
       activeCompanies: activeEmployersCount + activePublicEmployersCount,
