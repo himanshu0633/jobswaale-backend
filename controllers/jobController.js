@@ -1,10 +1,13 @@
 const Job = require('../models/Job');
 const Employer = require('../models/Employer');
 const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
 const Application = require('../models/Application');
 const Jobseeker = require('../models/Jobseeker');
+const Attachment = require('../models/Attachment');
 
 const getPublicJobConstraints = () => ({
   status: { $in: ['active', 'featured'] },
@@ -16,20 +19,86 @@ const getPublicJobConstraints = () => ({
   ]
 });
 
+const getPublicOrigin = (req) => {
+  const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+  const protocol = forwardedProto || req.protocol || 'https';
+  return (process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`).replace(/\/+$/, '');
+};
+
+const removeResumeFile = async (resumePath) => {
+  if (!resumePath) return;
+  try {
+    const filename = String(resumePath).split('/').pop();
+    if (!filename) return;
+
+    await Attachment.deleteOne({ filename });
+    const isVercel = process.env.VERCEL || process.env.NOW_BUILDER;
+    const oldFilePath = isVercel
+      ? path.join('/tmp', 'uploads', 'resumes', filename)
+      : path.join(__dirname, '..', 'uploads', 'resumes', filename);
+    if (fs.existsSync(oldFilePath)) {
+      fs.unlinkSync(oldFilePath);
+    }
+  } catch (err) {
+    console.error('Failed to remove old resume:', err);
+  }
+};
+
+const updateJobseekerResumeFromUpload = async (req, seeker) => {
+  if (!req.file) return seeker.resume || '';
+
+  await removeResumeFile(seeker.resume);
+
+  const fileData = fs.readFileSync(req.file.path);
+  await Attachment.findOneAndUpdate(
+    { filename: req.file.filename },
+    {
+      filename: req.file.filename,
+      data: fileData,
+      mimeType: req.file.mimetype,
+      originalName: req.file.originalname,
+      size: req.file.size
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  fs.unlink(req.file.path, () => {});
+
+  seeker.resume = `${getPublicOrigin(req)}/uploads/resumes/${req.file.filename}`;
+  await seeker.save();
+  return seeker.resume;
+};
+
 exports.getJobs = async (req, res) => {
   try {
     const jwt = require('jsonwebtoken');
     const User = require('../models/User');
     let isAdmin = false;
+    let seekerId = null;
+    let appliedJobIds = [];
+    let applicationStatusMap = {};
 
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
       try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.id);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
+        const user = await User.findById(decoded.id).select('role accountType').lean();
         if (user && (user.role === 'Admin' || user.role === 'SuperAdmin')) {
           isAdmin = true;
+        } else if (user) {
+          const seeker = await Jobseeker.findOne({ userId: user._id }).select('_id').lean();
+          if (seeker) {
+            seekerId = seeker._id;
+            const apps = await Application.find({ candidate: seeker._id, isDeleted: { $ne: true } })
+              .select('job status')
+              .lean();
+            appliedJobIds = apps.map((a) => a.job).filter(Boolean);
+            apps.forEach((a) => {
+              if (a.job) {
+                applicationStatusMap[a.job.toString()] = a.status || 'Applied';
+              }
+            });
+          }
         }
       } catch (err) {
         // Ignore invalid token
@@ -38,9 +107,21 @@ exports.getJobs = async (req, res) => {
 
     const filter = { isDeleted: { $ne: true } };
     if (!isAdmin) {
-      filter.$and = filter.$and || [];
-      filter.$and.push(getPublicJobConstraints());
+      const publicConstraints = getPublicJobConstraints();
+      if (appliedJobIds.length > 0) {
+        filter.$and = filter.$and || [];
+        filter.$and.push({
+          $or: [
+            publicConstraints,
+            { _id: { $in: appliedJobIds } }
+          ]
+        });
+      } else {
+        filter.$and = filter.$and || [];
+        filter.$and.push(publicConstraints);
+      }
     }
+
     if (req.query.employer) {
       if (!mongoose.Types.ObjectId.isValid(req.query.employer)) {
         return res.json([]);
@@ -69,14 +150,37 @@ exports.getJobs = async (req, res) => {
       .populate('qualification')
       .populate('currentPlan')
       .populate('login', 'email')
-      .populate('updatedLogin', 'email');
+      .populate('updatedLogin', 'email')
+      .sort({ postingDate: -1, createDate: -1 })
+      .lean();
+
+    const now = new Date();
+    const formattedList = list.map((job) => {
+      const jobIdStr = job._id ? job._id.toString() : '';
+      const appStatus = applicationStatusMap[jobIdStr] || null;
+      const isExpired = Boolean(job.jobExpiry && new Date(job.jobExpiry) < now);
+
+      let displayStatus = 'Active';
+      if (job.status === 'closed') displayStatus = 'Closed';
+      else if (job.status === 'inactive') displayStatus = 'Inactive';
+      else if (isExpired) displayStatus = 'Expired';
+      else if (job.status === 'featured') displayStatus = 'Featured';
+
+      return {
+        ...job,
+        displayStatus,
+        isExpired,
+        hasApplied: Boolean(appStatus),
+        applicationStatus: appStatus
+      };
+    });
 
     if (list && list.length > 0) {
-      const jobIds = list.map(job => job._id);
-      Job.updateMany({ _id: { $in: jobIds } }, { $inc: { impressions: 1 } }).catch(err => console.error('Error updating impressions:', err));
+      const jobIds = list.map((job) => job._id);
+      Job.updateMany({ _id: { $in: jobIds } }, { $inc: { impressions: 1 } }).catch((err) => console.error('Error updating impressions:', err));
     }
 
-    res.json(list);
+    res.json(formattedList);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -468,30 +572,45 @@ exports.getJobById = async (req, res) => {
     }
 
     let isAdmin = false;
-    if (req.query.raw === '1') {
-      const authHeader = req.headers.authorization;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        try {
-          const User = require('../models/User');
-          const token = authHeader.split(' ')[1];
-          const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
-          const user = await User.findById(decoded.id).select('role').lean();
-          isAdmin = ['Admin', 'SuperAdmin'].includes(user?.role);
-        } catch {
-          isAdmin = false;
+    let hasAppliedThisJob = false;
+    let candidateAppStatus = null;
+
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const User = require('../models/User');
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'supersecretjwtkeyforjobswaale123');
+        const user = await User.findById(decoded.id).select('role').lean();
+        isAdmin = ['Admin', 'SuperAdmin'].includes(user?.role);
+
+        if (!isAdmin) {
+          const Jobseeker = require('../models/Jobseeker');
+          const seeker = await Jobseeker.findOne({ userId: decoded.id }).select('_id').lean();
+          if (seeker) {
+            const app = await Application.findOne({ candidate: seeker._id, job: jobDoc._id, isDeleted: { $ne: true } }).lean();
+            if (app) {
+              hasAppliedThisJob = true;
+              candidateAppStatus = app.status || 'Applied';
+            }
+          }
         }
+      } catch {
+        isAdmin = false;
       }
-      if (isAdmin) {
-        return res.json({ job: jobDoc });
-      }
+    }
+
+    if (req.query.raw === '1' && isAdmin) {
+      return res.json({ job: jobDoc });
     }
 
     const now = new Date();
     const isPubliclyVisible =
-      ['active', 'featured'].includes(String(jobDoc.status || '').toLowerCase()) &&
+      (['active', 'featured'].includes(String(jobDoc.status || '').toLowerCase()) &&
       jobDoc.publishStatus === 'publish' &&
-      (!jobDoc.jobExpiry || new Date(jobDoc.jobExpiry) > now);
-    if (!isPubliclyVisible) {
+      (!jobDoc.jobExpiry || new Date(jobDoc.jobExpiry) > now)) ||
+      hasAppliedThisJob;
+    if (!isPubliclyVisible && !isAdmin) {
       return res.status(404).json({ message: 'Job not found' });
     }
 
@@ -537,9 +656,13 @@ exports.getJobById = async (req, res) => {
       skills: jobDoc.skills && jobDoc.skills.length > 0 ? jobDoc.skills : [],
       applicants: successfulApplicationsCount,
       applicationsCount: successfulApplicationsCount,
-      appliedCount: successfulApplicationsCount,
       jobExpiry: jobDoc.jobExpiry || null,
-      expiry: jobDoc.jobExpiry || null
+      expiry: jobDoc.jobExpiry || null,
+      status: jobDoc.status || 'active',
+      isExpired: Boolean(jobDoc.jobExpiry && new Date(jobDoc.jobExpiry) < now),
+      isClosed: jobDoc.status === 'closed',
+      hasApplied: hasAppliedThisJob,
+      applicationStatus: candidateAppStatus
     };
 
     const Employer = require('../models/Employer');
@@ -567,10 +690,9 @@ exports.getJobById = async (req, res) => {
       email: employerDoc?.altEmail || employerDoc?.userId?.email || ''
     };
 
-    let hasApplied = false;
+    let hasApplied = hasAppliedThisJob;
     let hasSaved = false;
     let matchScore = null;
-    const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
         const token = authHeader.split(' ')[1];
@@ -704,6 +826,8 @@ exports.applyJob = async (req, res) => {
       return res.status(400).json({ message: 'You have already applied for this job' });
     }
 
+    const latestResume = await updateJobseekerResumeFromUpload(req, seeker);
+
     // Calculate match score based on skills, location, experience, and qualification
     const matchScore = calculateMatchScore(job, seeker);
 
@@ -730,7 +854,7 @@ exports.applyJob = async (req, res) => {
       }
     }).catch(err => console.error('Failed to query employer for application email:', err));
 
-    res.status(201).json({ message: 'Applied successfully', application: app });
+    res.status(201).json({ message: 'Applied successfully', application: app, resume: latestResume });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

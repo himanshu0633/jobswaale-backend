@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect, authorizeAdminPortal } = require('../middleware/auth');
 const { auditMiddleware } = require('../middleware/audit');
+const { uploadResumeFile } = require('../middleware/resumeUpload');
 const {
   getJobs,
   getJobById,
@@ -16,7 +17,7 @@ const {
 router.get('/:id', getJobById);
 
 // Route for jobseekers to apply for a job
-router.post('/:id/apply', protect, applyJob);
+router.post('/:id/apply', protect, uploadResumeFile, applyJob);
 
 // Public route to list all active jobs
 router.get('/', getJobs);

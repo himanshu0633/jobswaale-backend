@@ -461,6 +461,20 @@ const paginate = (items, pageValue, limitValue) => {
   };
 };
 
+const getPagination = (totalValue, pageValue, limitValue) => {
+  const total = Math.max(Number(totalValue) || 0, 0);
+  const page = Math.max(Number(pageValue) || 1, 1);
+  const limit = Math.max(Number(limitValue) || 10, 1);
+  const totalPages = Math.max(Math.ceil(total / limit), 1);
+  const safePage = Math.min(page, totalPages);
+  const skip = (safePage - 1) * limit;
+  return {
+    skip,
+    limit,
+    pagination: { page: safePage, limit, total, totalPages }
+  };
+};
+
 const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload = true, hasCandidateAccess = true) => {
   const salary = parseSalaryRange(candidate.expectedSalary);
   const createdAt = candidate.createDate || candidate.createdAt;
