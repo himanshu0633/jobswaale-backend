@@ -3327,7 +3327,7 @@ exports.updateEmployerJob = async (req, res) => {
         phone: phone || employer?.phone || req.user.phone || existingJob.phone || 'N/A',
         currentPlan: currentPlan || employer?.currentPlan || existingJob.currentPlan || null,
         planValidity: planValidity || jobExpiry || employer?.planValidity || existingJob.planValidity || null,
-        status: finalPublishStatus === 'draft' ? 'pending' : (status || existingJob.status || 'inactive'),
+        status: finalPublishStatus === 'draft' ? 'pending' : (existingJob.status === 'active' ? 'active' : 'inactive'),
         updatedLogin: userId
       },
       { new: true }
@@ -3398,7 +3398,7 @@ exports.updateEmployerJobAction = async (req, res) => {
 
     if (action === 'renew') {
       const baseDate = job.jobExpiry && new Date(job.jobExpiry) > new Date() ? job.jobExpiry : new Date();
-      job.status = 'active';
+      job.status = 'inactive';
       job.publishStatus = 'publish';
       job.jobExpiry = addDays(baseDate, 30);
       job.planValidity = job.planValidity || job.jobExpiry;

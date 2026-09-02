@@ -424,6 +424,8 @@ exports.updateJob = async (req, res) => {
 
     // Send email to employer and alert jobseekers on activation
     const { sendJobPostedEmail, notifyMatchingJobseekers } = require('../utils/jobNotifications');
+    const { sendEmployerJobAutoMails } = require('../utils/employerAutoMail');
+    const Plan = require('../models/Plan');
     if (updated.status === 'active' && job.status !== 'active') {
       sendJobPostedEmail({
         to: updated.email || req.user.email,
@@ -433,6 +435,19 @@ exports.updateJob = async (req, res) => {
       }).catch(err => console.error('Failed to send job posted email:', err));
 
       notifyMatchingJobseekers(updated).catch(err => console.error('Failed to notify matching jobseekers:', err));
+
+      Employer.findOne({ $or: [{ userId: updated.login }, { login: updated.login }], isDeleted: { $ne: true } })
+        .then(async (emp) => {
+          if (!emp) return;
+          const planId = emp.currentPlan || null;
+          const activePlan = planId ? await Plan.findOne({ _id: planId, isDeleted: { $ne: true }, status: { $ne: 'inactive' } }).lean() : null;
+          await sendEmployerJobAutoMails({
+            employer: emp,
+            plan: activePlan,
+            job: updated.toObject ? updated.toObject() : updated
+          });
+        })
+        .catch(err => console.error('Failed to trigger auto mails on job activation:', err));
     }
 
     res.json(updated);
