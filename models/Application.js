@@ -122,5 +122,8 @@ ApplicationSchema.index({ job: 1 });
 ApplicationSchema.index({ candidate: 1 });
 ApplicationSchema.index({ status: 1 });
 ApplicationSchema.index({ candidate: 1, status: 1, updateDate: -1 });
+ApplicationSchema.index({ job: 1, status: 1, appliedDate: -1 });
+ApplicationSchema.index({ job: 1, status: 1, 'selectionDetails.offerStatus': 1, 'selectionDetails.selectedDate': -1 });
+ApplicationSchema.index({ job: 1, status: 1, 'interviewDetails.status': 1, 'interviewDetails.date': -1 });
 
 module.exports = mongoose.model('Application', ApplicationSchema);
