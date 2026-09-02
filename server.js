@@ -7,6 +7,13 @@ const connectDB = require('./config/db');
 const { maintenanceGuard } = require('./middleware/systemSettings');
 const { initSocket } = require('./realtime/socket');
 
+const safeDownloadName = (value, fallback) => (
+  String(value || fallback)
+    .replace(/[/\\?%*:|"<>]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim() || fallback
+);
+
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '.env') });
 
@@ -101,6 +108,7 @@ app.get('/uploads/offers/:filename', async (req, res, next) => {
     res.setHeader('Content-Type', file.mimeType);
     res.setHeader('Content-Length', file.size);
     res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeDownloadName(file.originalName || req.params.filename, 'offer-letter.pdf')}"`);
     return res.send(file.data);
   } catch (err) {
     console.error('Fetch offer letter error:', err);

@@ -51,6 +51,16 @@ const getResumeDownloadName = (resumePath = '', candidateName = 'candidate') => 
   return `${safeName}-resume.pdf`;
 };
 
+const getOfferDownloadName = (name = '', fallbackBase = 'candidate') => {
+  const filename = path.basename(String(name).split('?')[0]);
+  const ext = path.extname(filename).toLowerCase() || '.pdf';
+  const base = path.basename(filename || `${fallbackBase}-offer-letter`, path.extname(filename))
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'offer-letter';
+  return `${base}${ext}`;
+};
+
 const setResumeDownloadHeaders = (res, downloadName, mimeType, size) => {
   const ext = path.extname(downloadName).toLowerCase();
   const contentType = resumeMimeTypeByExt[ext] || mimeType || 'application/octet-stream';
@@ -60,7 +70,7 @@ const setResumeDownloadHeaders = (res, downloadName, mimeType, size) => {
   res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length, X-Remaining-Unlocks, X-Is-New-Unlock');
 };
 
-const checkEmployerPlanAccess = async (userId, candidateId = null) => {
+const checkEmployerPlanAccess = async (userId, candidateId = null, jobId = null) => {
   try {
     const employer = await Employer.findOne({
       $or: [{ userId }, { login: userId }],
@@ -111,12 +121,16 @@ const checkEmployerPlanAccess = async (userId, candidateId = null) => {
 
     let isUnlocked = false;
     if (candidateId) {
-      const existing = await EmployerResumeUnlock.findOne({
+      const unlockFilter = {
         employer: employer._id,
         candidate: candidateId,
         plan: planId,
         isDeleted: { $ne: true }
-      });
+      };
+      if (jobId) {
+        unlockFilter.job = jobId;
+      }
+      const existing = await EmployerResumeUnlock.findOne(unlockFilter);
       if (existing) {
         isUnlocked = true;
       }
@@ -760,7 +774,9 @@ exports.getEmployerCandidateProfile = async (req, res) => {
       return res.status(403).json({ message: 'You are not allowed to view this candidate profile.' });
     }
 
-    const access = await checkEmployerPlanAccess(userId, candidate._id);
+    const requestedJobId = req.query.jobId || null;
+    const effectiveJobId = requestedJobId || application?.job?._id || application?.job || null;
+    const access = await checkEmployerPlanAccess(userId, candidate._id, effectiveJobId);
 
     let showContacts = false;
     let allowDownload = false;
@@ -774,11 +790,12 @@ exports.getEmployerCandidateProfile = async (req, res) => {
         showContacts = true;
         allowDownload = true;
       } else if (!access.unlockLimitExhausted) {
-        // Automatically unlock!
+        // Automatically unlock for this job!
         await EmployerResumeUnlock.create(addAuditOnCreate(req, {
           employer: access.employerId,
           login: userId,
           candidate: candidate._id,
+          job: effectiveJobId,
           plan: access.planId
         }));
         showContacts = true;
@@ -1147,7 +1164,8 @@ exports.getEmployerApplicationDetails = async (req, res) => {
     }
 
     const candidateId = appDoc.candidate;
-    const access = await checkEmployerPlanAccess(req.user._id, candidateId);
+    const jobId = appDoc.job?._id || appDoc.job;
+    const access = await checkEmployerPlanAccess(req.user._id, candidateId, jobId);
     let autoUnlocked = false;
     let remainingUnlocks = Number.isFinite(access.unlockLimit)
       ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0))
@@ -1168,6 +1186,7 @@ exports.getEmployerApplicationDetails = async (req, res) => {
         employer: access.employerId,
         login: req.user._id,
         candidate: candidateId,
+        job: jobId,
         plan: access.planId
       }));
       autoUnlocked = true;
@@ -4240,6 +4259,37 @@ exports.getSentOffers = async (req, res) => {
   }
 };
 
+exports.downloadSentOfferAttachment = async (req, res) => {
+  try {
+    const SentOffer = require('../models/SentOffer');
+    const offer = await SentOffer.findOne({ _id: req.params.id, employer: req.user._id }).lean();
+    if (!offer) {
+      return res.status(404).json({ message: 'Offer not found.' });
+    }
+
+    const filename = path.basename(String(offer.attachmentUrl || '').split('?')[0]);
+    if (!filename) {
+      return res.status(404).json({ message: 'Offer PDF not found.' });
+    }
+
+    const file = await Attachment.findOne({ filename }).lean();
+    if (!file) {
+      return res.status(404).json({ message: 'Offer PDF not found.' });
+    }
+
+    const downloadName = getOfferDownloadName(offer.attachmentName || file.originalName || filename, offer.candidateEmail || 'candidate');
+
+    res.setHeader('Content-Type', file.mimeType || 'application/pdf');
+    if (file.size) res.setHeader('Content-Length', file.size);
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    return res.send(file.data);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // Send Candidate Offer Letter
 exports.sendOfferLetter = async (req, res) => {
   try {
@@ -4294,6 +4344,7 @@ exports.sendOfferLetter = async (req, res) => {
         filename: uploadedFile.filename,
         data: fileData,
         mimeType: uploadedFile.mimetype,
+        originalName: uploadedFile.originalname,
         size: uploadedFile.size
       });
 

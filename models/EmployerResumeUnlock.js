@@ -16,6 +16,10 @@ const EmployerResumeUnlockSchema = new mongoose.Schema({
     ref: 'Jobseeker',
     required: true
   },
+  job: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Job'
+  },
   plan: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Plan'
@@ -32,6 +36,11 @@ const EmployerResumeUnlockSchema = new mongoose.Schema({
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
 });
 
-EmployerResumeUnlockSchema.index({ employer: 1, candidate: 1, plan: 1 }, { unique: true });
+EmployerResumeUnlockSchema.index({ employer: 1, candidate: 1, job: 1, plan: 1 }, { unique: true });
 
-module.exports = mongoose.model('EmployerResumeUnlock', EmployerResumeUnlockSchema);
+const EmployerResumeUnlock = mongoose.model('EmployerResumeUnlock', EmployerResumeUnlockSchema);
+
+// Safely drop legacy index if it exists in MongoDB
+EmployerResumeUnlock.collection?.dropIndex('employer_1_candidate_1_plan_1').catch(() => {});
+
+module.exports = EmployerResumeUnlock;

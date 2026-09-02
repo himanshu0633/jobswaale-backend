@@ -15,6 +15,11 @@ const AttachmentSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  originalName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   size: {
     type: Number,
     required: true

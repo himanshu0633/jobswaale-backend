@@ -53,6 +53,7 @@ const {
   updateEmailTemplate,
   deleteEmailTemplate,
   getSentOffers,
+  downloadSentOfferAttachment,
   sendOfferLetter
 } = require('../controllers/employerDashboardController');
 
@@ -98,6 +99,7 @@ router.delete('/email-templates/:id', deleteEmailTemplate);
 
 // Sent Offer routes
 router.get('/sent-offers', getSentOffers);
+router.get('/sent-offers/:id/download', downloadSentOfferAttachment);
 router.post('/applications/:id/send-offer', uploadOfferFile, sendOfferLetter);
 
 // Application actions
