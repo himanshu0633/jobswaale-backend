@@ -55,13 +55,14 @@ const getApplicationDateMatch = (monthsBack = 5) => {
 
 exports.getDashboardStats = async (req, res) => {
   try {
-    const now = new Date();
     const notDeleted = { isDeleted: { $ne: true } };
     const activeJobFilter = {
       ...notDeleted,
-      status: { $in: ['active', 'featured'] },
-      publishStatus: 'publish',
-      $or: [{ jobExpiry: { $exists: false } }, { jobExpiry: null }, { jobExpiry: { $gte: now } }]
+      status: { $in: ['active', 'featured'] }
+    };
+    const inactiveJobFilter = {
+      ...notDeleted,
+      status: { $nin: ['active', 'featured'] }
     };
 
     const [jobseekerProfileUserIds, employerProfileUserIds] = await Promise.all([
@@ -86,6 +87,7 @@ exports.getDashboardStats = async (req, res) => {
       publicJobseekersCount,
       jobsCount,
       activeJobsCount,
+      inactiveJobsCount,
       activeEmployersCount,
       activeJobseekersCount,
       activePublicEmployersCount,
@@ -100,6 +102,7 @@ exports.getDashboardStats = async (req, res) => {
       User.countDocuments(publicJobseekerFilter),
       Job.countDocuments({ isDeleted: { $ne: true } }),
       Job.countDocuments(activeJobFilter),
+      Job.countDocuments(inactiveJobFilter),
       Employer.countDocuments({ isDeleted: { $ne: true }, status: 'active' }),
       Jobseeker.countDocuments({ isDeleted: { $ne: true }, status: 'active' }),
       User.countDocuments({ ...publicEmployerFilter, status: 'active' }),
@@ -190,7 +193,7 @@ exports.getDashboardStats = async (req, res) => {
       jobseekers: jobseekersCount + publicJobseekersCount,
       jobsPosted: jobsCount,
       activeJobs: activeJobsCount,
-      inactiveJobs: Math.max(jobsCount - activeJobsCount, 0),
+      inactiveJobs: inactiveJobsCount,
       totalUsers: jobseekersCount + publicJobseekersCount,
       activeUsers: activeJobseekersCount + activePublicJobseekersCount,
       activeCompanies: activeEmployersCount + activePublicEmployersCount,
