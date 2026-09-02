@@ -155,19 +155,10 @@ exports.getPublicEmployerDetail = async (req, res) => {
     const now = new Date();
     const jobs = await Job.find({
       isDeleted: { $ne: true },
-      status: { $in: ['active', 'featured'] },
+      status: { $nin: ['blacklist'] },
       $or: [
         { login: { $in: loginIds } },
         { companyName: employer.companyName }
-      ],
-      $and: [
-        {
-          $or: [
-            { jobExpiry: { $exists: false } },
-            { jobExpiry: null },
-            { jobExpiry: { $gt: now } }
-          ]
-        }
       ]
     })
       .populate('jobCategory')
@@ -175,10 +166,26 @@ exports.getPublicEmployerDetail = async (req, res) => {
       .sort({ postingDate: -1, createDate: -1 })
       .lean();
 
+    const getJobDisplayStatus = (job) => {
+      if (job.status === 'closed') return 'Closed';
+      if (job.status === 'inactive') return 'Inactive';
+      if (job.publishStatus === 'draft' || job.status === 'pending') return 'Draft';
+      const isExpired = Boolean(job.jobExpiry && new Date(job.jobExpiry) < now);
+      if (isExpired) return 'Expired';
+      if (job.status === 'featured') return 'Featured';
+      return 'Active';
+    };
+
+    const openJobsCount = jobs.filter((job) => {
+      const isExpired = Boolean(job.jobExpiry && new Date(job.jobExpiry) < now);
+      return !isExpired && ['active', 'featured'].includes(job.status);
+    }).length;
+
     const location = getLocation(employer);
     const industry = employer.industryType?.industryType || employer.companyType || 'General';
 
     let hasSaved = false;
+    let candidateApplicationsMap = {};
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
@@ -189,9 +196,23 @@ exports.getPublicEmployerDetail = async (req, res) => {
         const seeker = await Jobseeker.findOne({ userId: decoded.id }).select('_id savedEmployers').lean();
         if (seeker) {
           hasSaved = seeker.savedEmployers && seeker.savedEmployers.map(id => id.toString()).includes(employer._id.toString());
+
+          const Application = require('../models/Application');
+          const apps = await Application.find({
+            candidate: seeker._id,
+            job: { $in: jobs.map((j) => j._id) },
+            isDeleted: { $ne: true }
+          }).select('job status').lean();
+
+          apps.forEach((app) => {
+            const jobIdStr = app.job ? app.job.toString() : '';
+            if (jobIdStr) {
+              candidateApplicationsMap[jobIdStr] = app.status || 'Applied';
+            }
+          });
         }
       } catch (err) {
-        console.error('Check saved employer status error:', err);
+        console.error('Check saved employer / application status error:', err);
         hasSaved = false;
       }
     }
@@ -213,21 +234,37 @@ exports.getPublicEmployerDetail = async (req, res) => {
       online: employer.isVerified === true,
       rating: Number(employer.rating || 4.2),
       ratesCount: Number(employer.profileViews || 0),
-      openJobs: jobs.length,
+      openJobs: openJobsCount,
+      totalJobs: jobs.length,
       lastJobPostedAt: jobs[0]?.postingDate || jobs[0]?.createDate || null,
-      jobs: jobs.map((job) => ({
-        id: job.slug || job._id,
-        title: job.jobTitle,
-        company: job.companyName,
-        location: [job.city, job.state].filter(Boolean).join(', ') || (job.jobLocations || []).join(', ') || 'Location not specified',
-        salary: job.salary || (job.minSalary && job.maxSalary ? `₹${job.minSalary} - ${job.maxSalary}` : 'Not Specified'),
-        minSalary: job.minSalary,
-        maxSalary: job.maxSalary,
-        salaryUnit: job.salaryUnit || '',
-        type: job.jobType?.jobType || job.workMode || 'Full Time',
-        category: job.jobCategory?.categoryName || '',
-        logoLetter: job.companyName ? job.companyName.charAt(0).toUpperCase() : 'J'
-      })),
+      jobs: jobs.map((job) => {
+        const status = getJobDisplayStatus(job);
+        const jobIdStr = job._id ? job._id.toString() : '';
+        const appStatus = candidateApplicationsMap[jobIdStr] || null;
+        const isExpired = Boolean(job.jobExpiry && new Date(job.jobExpiry) < now);
+
+        return {
+          id: job.slug || job._id,
+          jobId: job._id,
+          title: job.jobTitle,
+          company: job.companyName,
+          location: [job.city, job.state].filter(Boolean).join(', ') || (job.jobLocations || []).join(', ') || 'Location not specified',
+          salary: job.salary || (job.minSalary && job.maxSalary ? `₹${job.minSalary} - ${job.maxSalary}` : 'Not Specified'),
+          minSalary: job.minSalary,
+          maxSalary: job.maxSalary,
+          salaryUnit: job.salaryUnit || '',
+          type: job.jobType?.jobType || job.workMode || 'Full Time',
+          category: job.jobCategory?.categoryName || '',
+          logoLetter: job.companyName ? job.companyName.charAt(0).toUpperCase() : 'J',
+          status,
+          rawStatus: job.status,
+          isExpired,
+          jobExpiry: job.jobExpiry || null,
+          postingDate: job.postingDate || job.createDate || null,
+          hasApplied: Boolean(appStatus),
+          applicationStatus: appStatus
+        };
+      }),
       hasSaved: Boolean(hasSaved)
     });
   } catch (error) {
