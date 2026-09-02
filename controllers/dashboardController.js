@@ -16,9 +16,11 @@ const getInitials = (name = '') => {
 };
 
 const getJobStatus = (job) => {
-  if (job.publishStatus === 'draft' || job.status === 'pending') return 'Pending';
+  if (job.status === 'paused') return 'Paused';
+  if (job.status === 'closed') return 'Closed';
   if (job.status === 'inactive') return 'Inactive';
-  if (job.status === 'closed') return 'Expired';
+  if (job.publishStatus === 'draft' || job.status === 'pending') return 'Pending';
+  if (job.status === 'expired') return 'Expired';
   if (job.jobExpiry && new Date(job.jobExpiry) < new Date()) return 'Expired';
   return 'Active';
 };
@@ -55,14 +57,34 @@ const getApplicationDateMatch = (monthsBack = 5) => {
 
 exports.getDashboardStats = async (req, res) => {
   try {
+    const now = new Date();
     const notDeleted = { isDeleted: { $ne: true } };
     const activeJobFilter = {
       ...notDeleted,
-      status: { $in: ['active', 'featured'] }
+      status: { $in: ['active', 'featured'] },
+      $or: [{ jobExpiry: { $exists: false } }, { jobExpiry: null }, { jobExpiry: { $gte: now } }]
     };
     const inactiveJobFilter = {
       ...notDeleted,
-      status: { $nin: ['active', 'featured'] }
+      status: { $in: ['inactive', 'pending', 'reviewed', 'blacklist'] }
+    };
+    const expiredJobFilter = {
+      ...notDeleted,
+      $or: [
+        { status: 'expired' },
+        {
+          status: { $in: ['active', 'featured'] },
+          jobExpiry: { $lt: now }
+        }
+      ]
+    };
+    const pausedJobFilter = {
+      ...notDeleted,
+      status: 'paused'
+    };
+    const closedJobFilter = {
+      ...notDeleted,
+      status: 'closed'
     };
 
     const [jobseekerProfileUserIds, employerProfileUserIds] = await Promise.all([
@@ -88,6 +110,9 @@ exports.getDashboardStats = async (req, res) => {
       jobsCount,
       activeJobsCount,
       inactiveJobsCount,
+      expiredJobsCount,
+      pausedJobsCount,
+      closedJobsCount,
       activeEmployersCount,
       activeJobseekersCount,
       activePublicEmployersCount,
@@ -103,6 +128,9 @@ exports.getDashboardStats = async (req, res) => {
       Job.countDocuments({ isDeleted: { $ne: true } }),
       Job.countDocuments(activeJobFilter),
       Job.countDocuments(inactiveJobFilter),
+      Job.countDocuments(expiredJobFilter),
+      Job.countDocuments(pausedJobFilter),
+      Job.countDocuments(closedJobFilter),
       Employer.countDocuments({ isDeleted: { $ne: true }, status: 'active' }),
       Jobseeker.countDocuments({ isDeleted: { $ne: true }, status: 'active' }),
       User.countDocuments({ ...publicEmployerFilter, status: 'active' }),
@@ -194,6 +222,9 @@ exports.getDashboardStats = async (req, res) => {
       jobsPosted: jobsCount,
       activeJobs: activeJobsCount,
       inactiveJobs: inactiveJobsCount,
+      expiredJobs: expiredJobsCount,
+      pausedJobs: pausedJobsCount,
+      closedJobs: closedJobsCount,
       totalUsers: jobseekersCount + publicJobseekersCount,
       activeUsers: activeJobseekersCount + activePublicJobseekersCount,
       activeCompanies: activeEmployersCount + activePublicEmployersCount,
