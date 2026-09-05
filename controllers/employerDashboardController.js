@@ -19,6 +19,7 @@ const User = require('../models/User');
 const SupportTicket = require('../models/SupportTicket');
 const Attachment = require('../models/Attachment');
 const EmployerResumeUnlock = require('../models/EmployerResumeUnlock');
+const { getSettings } = require('../utils/settings');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
 const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
 const {
@@ -3285,6 +3286,9 @@ exports.updateEmployerJob = async (req, res) => {
       matchedCity?.cid ? Country.findOne({ cid: matchedCity.cid, isDeleted: { $ne: true } }).lean() : null
     ]);
 
+    const settings = await getSettings();
+    const requireApproval = settings?.jobApprovalRequired !== false;
+
     const updatedJob = await Job.findByIdAndUpdate(
       existingJob._id,
       {
@@ -3327,8 +3331,10 @@ exports.updateEmployerJob = async (req, res) => {
         phone: phone || employer?.phone || req.user.phone || existingJob.phone || 'N/A',
         currentPlan: currentPlan || employer?.currentPlan || existingJob.currentPlan || null,
         planValidity: planValidity || jobExpiry || employer?.planValidity || existingJob.planValidity || null,
-        status: finalPublishStatus === 'draft' ? 'pending' : (existingJob.status === 'active' ? 'active' : 'inactive'),
-        updatedLogin: userId
+        status: finalPublishStatus === 'draft' ? 'pending' : (existingJob.status === 'active' ? 'active' : (requireApproval ? 'inactive' : 'active')),
+        updatedLogin: userId,
+        statusUpdatedBy: userId,
+        statusUpdatedAt: new Date()
       },
       { new: true }
     );
@@ -3387,25 +3393,42 @@ exports.updateEmployerJobAction = async (req, res) => {
       return res.status(400).json({ message: 'Invalid job action.' });
     }
 
+    const settings = await getSettings();
+    const requireApproval = settings?.jobApprovalRequired !== false;
+
     if (action === 'pause' || action === 'close') {
       job.status = 'closed';
     }
 
     if (action === 'reopen' || action === 'publish') {
-      job.status = 'inactive';
+      job.status = requireApproval ? 'inactive' : 'active';
       job.publishStatus = 'publish';
     }
 
     if (action === 'renew') {
       const baseDate = job.jobExpiry && new Date(job.jobExpiry) > new Date() ? job.jobExpiry : new Date();
-      job.status = 'inactive';
+      job.status = requireApproval ? 'inactive' : 'active';
       job.publishStatus = 'publish';
       job.jobExpiry = addDays(baseDate, 30);
       job.planValidity = job.planValidity || job.jobExpiry;
     }
 
     job.updatedLogin = userId;
+    job.statusUpdatedBy = userId;
+    job.statusUpdatedAt = new Date();
     await job.save();
+
+    if (job.status === 'active') {
+      const { sendJobPostedEmail, notifyMatchingJobseekers } = require('../utils/jobNotifications');
+      sendJobPostedEmail({
+        to: job.email || req.user.email,
+        employerName: job.contactPerson || job.companyName || req.user.firstName || 'Employer',
+        jobTitle: job.jobTitle,
+        recipientId: userId
+      }).catch(err => console.error('Failed to send job posted email:', err));
+
+      notifyMatchingJobseekers(job).catch(err => console.error('Failed to notify matching jobseekers:', err));
+    }
 
     res.json({ message: 'Job action updated successfully.', job });
   } catch (error) {
@@ -3515,6 +3538,11 @@ exports.createEmployerJob = async (req, res) => {
       matchedCity?.did ? District.findOne({ did: matchedCity.did, isDeleted: { $ne: true } }).lean() : null,
       matchedCity?.cid ? Country.findOne({ cid: matchedCity.cid, isDeleted: { $ne: true } }).lean() : null
     ]);
+
+    const settings = await getSettings();
+    const requireApproval = settings?.jobApprovalRequired !== false;
+    const initialStatus = finalPublishStatus === 'draft' ? 'pending' : (requireApproval ? 'inactive' : 'active');
+
     const job = await Job.create({
       jobTitle,
       jobCategory,
@@ -3555,10 +3583,25 @@ exports.createEmployerJob = async (req, res) => {
       phone: phone || employer?.phone || req.user.phone || 'N/A',
       currentPlan: currentPlan || employer?.currentPlan || req.user.selectedPlan || null,
       planValidity: planValidity || jobExpiry || employer?.planValidity || null,
-      status: finalPublishStatus === 'draft' ? 'pending' : 'inactive',
+      status: initialStatus,
+      statusUpdatedBy: userId,
+      statusUpdatedAt: new Date(),
       ip: req.clientIp || '127.0.0.1',
       login: userId
     });
+
+    if (initialStatus === 'active') {
+      const { sendJobPostedEmail, notifyMatchingJobseekers } = require('../utils/jobNotifications');
+      sendJobPostedEmail({
+        to: job.email || req.user.email,
+        employerName: job.contactPerson || job.companyName || req.user.firstName || 'Employer',
+        jobTitle: job.jobTitle,
+        recipientId: userId
+      }).catch(err => console.error('Failed to send job posted email:', err));
+
+      notifyMatchingJobseekers(job).catch(err => console.error('Failed to notify matching jobseekers:', err));
+    }
+
     const autoMail = await sendEmployerJobAutoMails({
       employer,
       plan: activePlan,
@@ -3566,7 +3609,11 @@ exports.createEmployerJob = async (req, res) => {
     });
 
     res.status(201).json({
-      message: finalPublishStatus === 'draft' ? 'Draft saved successfully.' : 'Job posted successfully. It will be activated after admin review.',
+      message: finalPublishStatus === 'draft'
+        ? 'Draft saved successfully.'
+        : (requireApproval
+            ? 'Job posted successfully. It will be activated after admin review.'
+            : 'Job posted and published live successfully.'),
       job,
       autoMail
     });

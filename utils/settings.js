@@ -11,6 +11,7 @@ const defaultSettings = {
   dateFormat: 'd-m-Y',
   maintenanceMode: false,
   userRegistration: true,
+  jobApprovalRequired: true,
   notifNewJob: true,
   notifNewApp: true,
   notifNewEmp: true,
@@ -36,6 +37,7 @@ const defaultSettings = {
 const booleanKeys = [
   'maintenanceMode',
   'userRegistration',
+  'jobApprovalRequired',
   'notifNewJob',
   'notifNewApp',
   'notifNewEmp',
@@ -96,6 +98,7 @@ const getPublicSettings = (settings) => {
     dateFormat: safe.dateFormat,
     maintenanceMode: safe.maintenanceMode,
     userRegistration: safe.userRegistration,
+    jobApprovalRequired: safe.jobApprovalRequired,
     minPassLen: safe.minPassLen,
     captchaEnabled: safe.captchaEnabled
   };

@@ -149,8 +149,9 @@ exports.getJobs = async (req, res) => {
       .populate('jobType')
       .populate('qualification')
       .populate('currentPlan')
-      .populate('login', 'email')
-      .populate('updatedLogin', 'email')
+      .populate('login', 'firstName lastName username email role accountType companyName')
+      .populate('updatedLogin', 'firstName lastName username email role accountType companyName')
+      .populate('statusUpdatedBy', 'firstName lastName username email role accountType companyName')
       .sort({ postingDate: -1, createDate: -1 })
       .lean();
 
@@ -279,6 +280,8 @@ exports.createJob = async (req, res) => {
       planValidity: planValidity || null,
       document,
       status: status || 'active',
+      statusUpdatedBy: req.user ? req.user._id : null,
+      statusUpdatedAt: new Date(),
       blacklistReason: blacklistReason || '',
       ip: req.clientIp || '127.0.0.1',
       login: req.user ? req.user._id : null
@@ -417,7 +420,11 @@ exports.updateJob = async (req, res) => {
         status: status !== undefined ? status : job.status,
         blacklistReason: blacklistReason !== undefined ? blacklistReason : (job.blacklistReason || ''),
         ip: req.clientIp || job.ip || '127.0.0.1',
-        updatedLogin: req.user ? req.user._id : job.updatedLogin
+        updatedLogin: req.user ? req.user._id : job.updatedLogin,
+        ...(status !== undefined ? {
+          statusUpdatedBy: req.user ? req.user._id : job.statusUpdatedBy,
+          statusUpdatedAt: new Date()
+        } : {})
       },
       { returnDocument: 'after' }
     );
@@ -450,7 +457,17 @@ exports.updateJob = async (req, res) => {
         .catch(err => console.error('Failed to trigger auto mails on job activation:', err));
     }
 
-    res.json(updated);
+    const populated = await Job.findById(updated._id)
+      .populate('jobCategory')
+      .populate('jobType')
+      .populate('qualification')
+      .populate('currentPlan')
+      .populate('login', 'firstName lastName username email role accountType companyName')
+      .populate('updatedLogin', 'firstName lastName username email role accountType companyName')
+      .populate('statusUpdatedBy', 'firstName lastName username email role accountType companyName')
+      .lean();
+
+    res.json(populated || updated);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -483,7 +500,9 @@ exports.getJobApplicationHistory = async (req, res) => {
       .populate('jobCategory', 'categoryName')
       .populate('jobType', 'jobType')
       .populate('qualification', 'name')
-      .populate('login', 'email firstName lastName companyName')
+      .populate('login', 'email firstName lastName username role companyName')
+      .populate('updatedLogin', 'email firstName lastName username role companyName')
+      .populate('statusUpdatedBy', 'email firstName lastName username role companyName')
       .lean();
 
     if (!job) {
@@ -544,6 +563,8 @@ exports.getJobApplicationHistory = async (req, res) => {
         email: job.email || job.login?.email || '',
         phone: job.phone || '',
         status: job.status || '',
+        statusUpdatedBy: job.statusUpdatedBy || job.updatedLogin || job.login || null,
+        statusUpdatedAt: job.statusUpdatedAt || job.updateDate || null,
         postedOn: job.postingDate || job.createDate || null,
         expiry: job.jobExpiry || null,
         description: job.description || ''
