@@ -25,7 +25,7 @@ const buildUserWelcomeEmail = ({ firstName, email, password, roleName }) => {
                       <tr><td style="padding:0 16px 14px;font-size:14px;"><strong>Role:</strong> ${roleName}</td></tr>
                     </table>
                     <p style="margin:0 0 18px;font-size:14px;color:#64748b;line-height:1.6;">Please change your password after first login and keep these credentials private.</p>
-                    <a href="${process.env.FRONTEND_URL || 'http://localhost:5173/login'}" style="display:inline-block;background:#6658dd;color:#ffffff;text-decoration:none;padding:11px 18px;border-radius:6px;font-weight:700;font-size:14px;">Open Admin Portal</a>
+                    <a href="${process.env.FRONTEND_URL || 'https://jobswaale.com/login'}" style="display:inline-block;background:#6658dd;color:#ffffff;text-decoration:none;padding:11px 18px;border-radius:6px;font-weight:700;font-size:14px;">Open Admin Portal</a>
                   </td>
                 </tr>
                 <tr>
@@ -202,7 +202,7 @@ const sendAdminNotification = async ({ enabled, subject, title, rows = [] }) => 
 };
 
 const buildJobAlertEmail = ({ seekerName, job, employer, categoryName }) => {
-  const frontUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontUrl = process.env.FRONTEND_URL || 'https://jobswaale.com';
   const jobUrl = `${frontUrl}/jobs/${job.slug || job._id}`;
   return `
     <div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;line-height:1.55;">

@@ -77,7 +77,7 @@ const sendPlanExpiryEmail = async ({ to, name, daysRemaining, expiryDate, catego
           <p>Hi ${escapeHtml(name)},</p>
           <p>${escapeHtml(message)}</p>
           <p style="margin-top:24px;">
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/${category.toLowerCase()}/subscription" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">Renew Subscription</a>
+            <a href="${process.env.FRONTEND_URL || 'https://jobswaale.com'}/${category.toLowerCase()}/subscription" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">Renew Subscription</a>
           </p>
         </div>
       `
@@ -119,7 +119,7 @@ const sendJobPostedEmail = async ({ to, employerName, jobTitle, recipientId }) =
           <p>${escapeHtml(message)}</p>
           <p>You can manage applications and view details through your employer dashboard.</p>
           <p style="margin-top:24px;">
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/employer/jobs" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">Manage Jobs</a>
+            <a href="${process.env.FRONTEND_URL || 'https://jobswaale.com'}/employer/jobs" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">Manage Jobs</a>
           </p>
         </div>
       `
@@ -161,7 +161,7 @@ const sendEmployerNewApplicationEmail = async ({ to, employerName, jobTitle, can
           <p>${escapeHtml(message)}</p>
           <p>Log in to review their details and schedule an interview.</p>
           <p style="margin-top:24px;">
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/employer/applications" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">View Applications</a>
+            <a href="${process.env.FRONTEND_URL || 'https://jobswaale.com'}/employer/applications" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">View Applications</a>
           </p>
         </div>
       `
@@ -225,7 +225,7 @@ const sendApplicationStatusEmail = async ({ to, seekerName, jobTitle, companyNam
           <p>${escapeHtml(message)}</p>
           <p>Please log in to your dashboard to check further details or instructions.</p>
           <p style="margin-top:24px;">
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/jobseeker/jobs-applied?filter=${filter}" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">View My Applications</a>
+            <a href="${process.env.FRONTEND_URL || 'https://jobswaale.com'}/jobseeker/jobs-applied?filter=${filter}" style="display:inline-block;background:#4f46e5;color:#fff;text-decoration:none;padding:10px 18px;border-radius:6px;font-weight:700;">View My Applications</a>
           </p>
         </div>
       `

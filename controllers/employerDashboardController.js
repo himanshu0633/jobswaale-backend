@@ -557,10 +557,10 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
 
 const getJobDisplayStatus = (job) => {
   if (job.publishStatus === 'draft' || job.status === 'pending') return 'Draft';
+  const remainingDays = daysFromToday(job.jobExpiry);
+  if (job.status === 'expired' || (remainingDays !== null && remainingDays < 0)) return 'Expired';
   if (job.status === 'closed' || job.status === 'paused') return 'Closed';
   if (job.status === 'inactive') return 'Inactive';
-  const remainingDays = daysFromToday(job.jobExpiry);
-  if (remainingDays !== null && remainingDays < 0) return 'Expired';
   return 'Active';
 };
 
@@ -3263,6 +3263,14 @@ exports.updateEmployerJob = async (req, res) => {
       return res.status(404).json({ message: 'Job not found.' });
     }
 
+    const remainingDays = daysFromToday(existingJob.jobExpiry);
+    const isExpired = existingJob.status === 'expired' || (remainingDays !== null && remainingDays < 0);
+    const isInactive = existingJob.status === 'inactive';
+
+    if (isExpired || isInactive) {
+      return res.status(400).json({ message: 'Inactive or expired jobs cannot be edited.' });
+    }
+
     const {
       jobTitle,
       jobCategory,
@@ -3434,18 +3442,32 @@ exports.updateEmployerJobAction = async (req, res) => {
     const settings = await getSettings();
     const requireApproval = settings?.jobApprovalRequired !== false;
 
+    const remainingDays = daysFromToday(job.jobExpiry);
+    const isExpired = job.status === 'expired' || (remainingDays !== null && remainingDays < 0);
+
     if (action === 'pause' || action === 'close') {
+      if (job.status === 'inactive' || isExpired) {
+        return res.status(400).json({ message: 'Cannot close an inactive or expired job.' });
+      }
       job.status = 'closed';
     }
 
-    if (action === 'reopen' || action === 'publish') {
+    if (action === 'reopen') {
+      if (isExpired) {
+        return res.status(400).json({ message: 'This job has expired and cannot be reopened. Please renew the job.' });
+      }
+      job.status = 'active';
+      job.publishStatus = 'publish';
+    }
+
+    if (action === 'publish') {
       job.status = requireApproval ? 'inactive' : 'active';
       job.publishStatus = 'publish';
     }
 
     if (action === 'renew') {
       const baseDate = job.jobExpiry && new Date(job.jobExpiry) > new Date() ? job.jobExpiry : new Date();
-      job.status = requireApproval ? 'inactive' : 'active';
+      job.status = 'active';
       job.publishStatus = 'publish';
       job.jobExpiry = addDays(baseDate, 30);
       job.planValidity = job.planValidity || job.jobExpiry;
