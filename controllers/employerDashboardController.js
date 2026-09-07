@@ -62,6 +62,26 @@ const getOfferDownloadName = (name = '', fallbackBase = 'candidate') => {
   return `${base}${ext}`;
 };
 
+const toFileBuffer = (data) => {
+  if (!data) return Buffer.alloc(0);
+  if (Buffer.isBuffer(data)) return data;
+  if (typeof data.value === 'function') {
+    const val = data.value(true);
+    return Buffer.isBuffer(val) ? val : Buffer.from(val);
+  }
+  if (data.buffer && (Buffer.isBuffer(data.buffer) || data.buffer instanceof ArrayBuffer)) {
+    return Buffer.from(data.buffer);
+  }
+  if (Array.isArray(data.data)) {
+    return Buffer.from(data.data);
+  }
+  if (typeof data === 'string') {
+    const cleaned = data.trim().replace(/^"|"$/g, '');
+    return Buffer.from(cleaned, 'base64');
+  }
+  return Buffer.from(data);
+};
+
 const setResumeDownloadHeaders = (res, downloadName, mimeType, size) => {
   const ext = path.extname(downloadName).toLowerCase();
   const contentType = resumeMimeTypeByExt[ext] || mimeType || 'application/octet-stream';
@@ -1422,8 +1442,11 @@ exports.downloadCandidateResume = async (req, res) => {
     const downloadName = getResumeDownloadName(candidate.resume, candidate.name);
     const attachment = await Attachment.findOne({ filename });
     if (attachment) {
-      setResumeDownloadHeaders(res, downloadName, attachment.mimeType, attachment.size || attachment.data.length);
-      return res.send(attachment.data);
+      const fileBuffer = toFileBuffer(attachment.data);
+      if (fileBuffer.length) {
+        setResumeDownloadHeaders(res, downloadName, attachment.mimeType, fileBuffer.length);
+        return res.end(fileBuffer);
+      }
     }
 
     let resumePathname = String(candidate.resume || '');
@@ -2877,6 +2900,21 @@ exports.uploadEmployerBanner = async (req, res) => {
     }
 
     const userId = req.user._id;
+    const fs = require('fs');
+    const Attachment = require('../models/Attachment');
+    const fileData = fs.readFileSync(req.file.path);
+    await Attachment.findOneAndUpdate(
+      { filename: req.file.filename },
+      {
+        filename: req.file.filename,
+        data: fileData,
+        mimeType: req.file.mimetype,
+        size: req.file.size
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    fs.unlink(req.file.path, () => {});
+
     const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
     const protocol = forwardedProto || req.protocol || 'https';
     const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
@@ -4254,6 +4292,10 @@ exports.getEmployerSettings = async (req, res) => {
           showPhone: false,
           readReceipts: true,
           emailSearch: true
+        },
+        twoFactor: {
+          authApp: false,
+          emailOtp: true
         }
       }
     });
@@ -4266,7 +4308,7 @@ exports.getEmployerSettings = async (req, res) => {
 exports.updateEmployerSettings = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { type, profile, password, notifications, preferences, privacy } = req.body;
+    const { type, profile, password, notifications, preferences, privacy, twoFactor, reason } = req.body;
 
     let employer = await Employer.findOne({
       $or: [{ userId }, { login: userId }],
@@ -4293,16 +4335,31 @@ exports.updateEmployerSettings = async (req, res) => {
       user.firstName = parts[0] || '';
       user.lastName = parts.slice(1).join(' ') || '';
       user.designation = profile.jobTitle || '';
+      if (profile.phone) user.phone = profile.phone;
       await user.save();
 
       employer.phone = profile.phone || employer.phone;
+      employer.contactPerson = profile.fullName || employer.contactPerson;
       employer.department = profile.department || '';
       employer.altEmail = profile.altEmail || '';
       employer.bio = profile.bio || '';
       if (profile.companyBanner !== undefined) employer.bannerImage = profile.companyBanner || '';
       await employer.save();
 
-      return res.json({ message: 'Profile settings saved successfully.' });
+      return res.json({
+        message: 'Profile settings saved successfully.',
+        user: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone,
+          designation: user.designation,
+          companyName: employer.companyName,
+          accountType: user.accountType,
+          role: user.role
+        }
+      });
     }
 
     if (type === 'password') {
@@ -4326,8 +4383,9 @@ exports.updateEmployerSettings = async (req, res) => {
           ...notifications
         }
       };
+      employer.markModified('settings');
       await employer.save();
-      return res.json({ message: 'Notification settings saved.' });
+      return res.json({ message: 'Notification preferences saved.' });
     }
 
     if (type === 'preferences') {
@@ -4338,6 +4396,7 @@ exports.updateEmployerSettings = async (req, res) => {
           ...preferences
         }
       };
+      employer.markModified('settings');
       await employer.save();
       return res.json({ message: 'App preferences saved.' });
     }
@@ -4350,8 +4409,22 @@ exports.updateEmployerSettings = async (req, res) => {
           ...privacy
         }
       };
+      employer.markModified('settings');
       await employer.save();
       return res.json({ message: 'Privacy preferences saved.' });
+    }
+
+    if (type === 'twoFactor') {
+      employer.settings = {
+        ...employer.settings,
+        twoFactor: {
+          ...employer.settings?.twoFactor,
+          ...twoFactor
+        }
+      };
+      employer.markModified('settings');
+      await employer.save();
+      return res.json({ message: 'Two-factor authentication settings saved.' });
     }
 
     if (type === 'delete') {
@@ -4361,7 +4434,11 @@ exports.updateEmployerSettings = async (req, res) => {
 
       employer.isDeleted = true;
       employer.status = 'blacklist';
+      if (reason) employer.blacklistReason = reason;
       await employer.save();
+
+      const Job = require('../models/Job');
+      await Job.updateMany({ login: userId }, { status: 'Closed' });
 
       return res.json({ message: 'Recruiter account deleted successfully.' });
     }
@@ -4506,19 +4583,28 @@ exports.downloadSentOfferAttachment = async (req, res) => {
       return res.status(404).json({ message: 'Offer PDF not found.' });
     }
 
-    const file = await Attachment.findOne({ filename }).lean();
-    if (!file) {
+    const file = await Attachment.findOne({ filename });
+    let fileBuffer = file ? toFileBuffer(file.data) : null;
+
+    if (!fileBuffer || !fileBuffer.length) {
+      const localPath = path.join(__dirname, '..', 'uploads', 'offers', filename);
+      if (fs.existsSync(localPath)) {
+        fileBuffer = fs.readFileSync(localPath);
+      }
+    }
+
+    if (!fileBuffer || !fileBuffer.length) {
       return res.status(404).json({ message: 'Offer PDF not found.' });
     }
 
-    const downloadName = getOfferDownloadName(offer.attachmentName || file.originalName || filename, offer.candidateEmail || 'candidate');
+    const downloadName = getOfferDownloadName(offer.attachmentName || file?.originalName || filename, offer.candidateEmail || 'candidate');
 
-    res.setHeader('Content-Type', file.mimeType || 'application/pdf');
-    if (file.size) res.setHeader('Content-Length', file.size);
+    res.setHeader('Content-Type', file?.mimeType || 'application/pdf');
+    res.setHeader('Content-Length', fileBuffer.length);
     res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
     res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length');
     res.setHeader('Cache-Control', 'private, max-age=3600');
-    return res.send(file.data);
+    return res.end(fileBuffer);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -14,6 +14,25 @@ const safeDownloadName = (value, fallback) => (
     .trim() || fallback
 );
 
+const toFileBuffer = (data) => {
+  if (!data) return Buffer.alloc(0);
+  if (Buffer.isBuffer(data)) return data;
+  if (typeof data.value === 'function') {
+    const val = data.value(true);
+    return Buffer.isBuffer(val) ? val : Buffer.from(val);
+  }
+  if (data.buffer && (Buffer.isBuffer(data.buffer) || data.buffer instanceof ArrayBuffer)) {
+    return Buffer.from(data.buffer);
+  }
+  if (Array.isArray(data.data)) {
+    return Buffer.from(data.data);
+  }
+  if (typeof data === 'string') {
+    return Buffer.from(data.trim().replace(/^"|"$/g, ''), 'base64');
+  }
+  return Buffer.from(data);
+};
+
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '.env') });
 
@@ -31,7 +50,8 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Disposition', 'Content-Type', 'Content-Length', 'X-Remaining-Unlocks', 'X-Is-New-Unlock']
 };
 
 app.use(cors(corsOptions));
@@ -54,10 +74,12 @@ app.get('/uploads/messages/:filename', async (req, res, next) => {
     if (!file) {
       return next();
     }
-    res.setHeader('Content-Type', file.mimeType);
-    res.setHeader('Content-Length', file.size);
+    const fileBuffer = toFileBuffer(file.data);
+    if (!fileBuffer.length) return next();
+    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', fileBuffer.length);
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    return res.send(file.data);
+    return res.end(fileBuffer);
   } catch (err) {
     console.error('Fetch attachment error:', err);
     next(err);
@@ -71,10 +93,12 @@ app.get('/uploads/resumes/:filename', async (req, res, next) => {
     if (!file) {
       return next();
     }
-    res.setHeader('Content-Type', file.mimeType);
-    res.setHeader('Content-Length', file.size);
+    const fileBuffer = toFileBuffer(file.data);
+    if (!fileBuffer.length) return next();
+    res.setHeader('Content-Type', file.mimeType || 'application/pdf');
+    res.setHeader('Content-Length', fileBuffer.length);
     res.setHeader('Cache-Control', 'private, max-age=3600');
-    return res.send(file.data);
+    return res.end(fileBuffer);
   } catch (err) {
     console.error('Fetch resume error:', err);
     next(err);
@@ -88,10 +112,12 @@ app.get('/uploads/employer-logos/:filename', async (req, res, next) => {
     if (!file) {
       return next();
     }
-    res.setHeader('Content-Type', file.mimeType);
-    res.setHeader('Content-Length', file.size);
+    const fileBuffer = toFileBuffer(file.data);
+    if (!fileBuffer.length) return next();
+    res.setHeader('Content-Type', file.mimeType || 'image/png');
+    res.setHeader('Content-Length', fileBuffer.length);
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    return res.send(file.data);
+    return res.end(fileBuffer);
   } catch (err) {
     console.error('Fetch employer logo error:', err);
     next(err);
@@ -105,13 +131,34 @@ app.get('/uploads/offers/:filename', async (req, res, next) => {
     if (!file) {
       return next();
     }
-    res.setHeader('Content-Type', file.mimeType);
-    res.setHeader('Content-Length', file.size);
+    const fileBuffer = toFileBuffer(file.data);
+    if (!fileBuffer.length) return next();
+    res.setHeader('Content-Type', file.mimeType || 'application/pdf');
+    res.setHeader('Content-Length', fileBuffer.length);
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.setHeader('Content-Disposition', `attachment; filename="${safeDownloadName(file.originalName || req.params.filename, 'offer-letter.pdf')}"`);
-    return res.send(file.data);
+    return res.end(fileBuffer);
   } catch (err) {
     console.error('Fetch offer letter error:', err);
+    next(err);
+  }
+});
+
+app.get('/uploads/employer-banners/:filename', async (req, res, next) => {
+  try {
+    const Attachment = require('./models/Attachment');
+    const file = await Attachment.findOne({ filename: req.params.filename });
+    if (!file) {
+      return next();
+    }
+    const fileBuffer = toFileBuffer(file.data);
+    if (!fileBuffer.length) return next();
+    res.setHeader('Content-Type', file.mimeType || 'image/png');
+    res.setHeader('Content-Length', fileBuffer.length);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.end(fileBuffer);
+  } catch (err) {
+    console.error('Fetch employer banner error:', err);
     next(err);
   }
 });

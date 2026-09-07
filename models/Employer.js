@@ -122,6 +122,10 @@ const EmployerSchema = new mongoose.Schema({
       showPhone: { type: Boolean, default: false },
       readReceipts: { type: Boolean, default: true },
       emailSearch: { type: Boolean, default: true }
+    },
+    twoFactor: {
+      authApp: { type: Boolean, default: false },
+      emailOtp: { type: Boolean, default: true }
     }
   },
   currentPlan: {
