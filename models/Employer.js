@@ -135,6 +135,13 @@ const EmployerSchema = new mongoose.Schema({
   planValidity: {
     type: Date
   },
+  planStartDate: {
+    type: Date
+  },
+  currentPayment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Payment'
+  },
   logo: {
     type: String,
     default: ''

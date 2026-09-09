@@ -17,6 +17,19 @@ exports.checkPlanExpiries = async (req, res) => {
     let notifiedEmployersCount = 0;
     let notifiedJobseekersCount = 0;
 
+    // Expire jobs whose planValidity or jobExpiry has passed
+    const Job = require('../models/Job');
+    await Job.updateMany(
+      {
+        status: { $in: ['active', 'featured'] },
+        $or: [
+          { jobExpiry: { $lt: new Date() } },
+          { planValidity: { $lt: new Date() } }
+        ]
+      },
+      { status: 'expired' }
+    );
+
     // 1. Process Employers
     const employers = await Employer.find({
       status: 'active',

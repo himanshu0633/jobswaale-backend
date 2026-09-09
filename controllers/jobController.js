@@ -16,6 +16,15 @@ const getPublicJobConstraints = () => ({
     { jobExpiry: { $exists: false } },
     { jobExpiry: null },
     { jobExpiry: { $gt: new Date() } }
+  ],
+  $and: [
+    {
+      $or: [
+        { planValidity: { $exists: false } },
+        { planValidity: null },
+        { planValidity: { $gt: new Date() } }
+      ]
+    }
   ]
 });
 
@@ -159,7 +168,10 @@ exports.getJobs = async (req, res) => {
     const formattedList = list.map((job) => {
       const jobIdStr = job._id ? job._id.toString() : '';
       const appStatus = applicationStatusMap[jobIdStr] || null;
-      const isExpired = Boolean(job.jobExpiry && new Date(job.jobExpiry) < now);
+      const isExpired = Boolean(
+        (job.jobExpiry && new Date(job.jobExpiry) < now) ||
+        (job.planValidity && new Date(job.planValidity) < now)
+      );
 
       let displayStatus = 'Active';
       if (job.status === 'closed') displayStatus = 'Closed';
@@ -694,8 +706,10 @@ exports.getJobById = async (req, res) => {
       applicationsCount: successfulApplicationsCount,
       jobExpiry: jobDoc.jobExpiry || null,
       expiry: jobDoc.jobExpiry || null,
-      status: jobDoc.status || 'active',
-      isExpired: Boolean(jobDoc.jobExpiry && new Date(jobDoc.jobExpiry) < now),
+      isExpired: Boolean(
+        (jobDoc.jobExpiry && new Date(jobDoc.jobExpiry) < now) ||
+        (jobDoc.planValidity && new Date(jobDoc.planValidity) < now)
+      ),
       isClosed: jobDoc.status === 'closed',
       hasApplied: hasAppliedThisJob,
       applicationStatus: candidateAppStatus

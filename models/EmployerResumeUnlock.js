@@ -24,6 +24,10 @@ const EmployerResumeUnlockSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Plan'
   },
+  payment: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Payment'
+  },
   ip: {
     type: String,
     default: ''
@@ -36,11 +40,13 @@ const EmployerResumeUnlockSchema = new mongoose.Schema({
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
 });
 
-EmployerResumeUnlockSchema.index({ employer: 1, candidate: 1, job: 1, plan: 1 }, { unique: true });
+EmployerResumeUnlockSchema.index({ employer: 1, candidate: 1, payment: 1 }, { unique: true, sparse: true });
+EmployerResumeUnlockSchema.index({ employer: 1, plan: 1, createDate: -1 });
 
 const EmployerResumeUnlock = mongoose.model('EmployerResumeUnlock', EmployerResumeUnlockSchema);
 
-// Safely drop legacy index if it exists in MongoDB
+// Safely drop legacy indexes if they exist in MongoDB
 EmployerResumeUnlock.collection?.dropIndex('employer_1_candidate_1_plan_1').catch(() => {});
+EmployerResumeUnlock.collection?.dropIndex('employer_1_candidate_1_job_1_plan_1').catch(() => {});
 
 module.exports = EmployerResumeUnlock;

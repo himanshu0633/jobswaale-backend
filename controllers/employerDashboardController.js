@@ -91,50 +91,119 @@ const setResumeDownloadHeaders = (res, downloadName, mimeType, size) => {
   res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type, Content-Length, X-Remaining-Unlocks, X-Is-New-Unlock');
 };
 
-const checkEmployerPlanAccess = async (userId, candidateId = null, jobId = null) => {
-  try {
-    const employer = await Employer.findOne({
-      $or: [{ userId }, { login: userId }],
-      isDeleted: { $ne: true }
-    }).populate('currentPlan');
+const getUnlockLimit = (plan) => {
+  const rawValue = String(plan?.unlockCount || '').trim();
+  if (!rawValue) return 0;
+  if (/unlimited/i.test(rawValue)) return Number.POSITIVE_INFINITY;
+  const parsed = Number(rawValue.replace(/[^\d]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
-    if (!employer || !employer.currentPlan) {
-      console.log('[DEBUG checkEmployerPlanAccess] Employer or currentPlan not found', { userId });
-      return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
-    }
+const getEmployerActiveSubscriptionContext = async (userId, employerDoc = null) => {
+  const employer = employerDoc || await Employer.findOne({
+    $or: [{ userId }, { login: userId }],
+    isDeleted: { $ne: true }
+  }).populate('currentPlan');
 
-    const plan = employer.currentPlan;
-    const planEndDate = employer.planValidity || plan.endDate || null;
-    
-    let isPlanActive = true;
-    if (planEndDate) {
-      const planEndDateStr = String(planEndDate).toLowerCase();
-      if (planEndDateStr.includes('free') || planEndDateStr.includes('always')) {
-        isPlanActive = true;
-      } else {
-        const endTime = new Date(planEndDate).getTime();
-        if (!isNaN(endTime)) {
-          isPlanActive = endTime >= Date.now();
-        }
+  if (!employer) {
+    return {
+      employer: null,
+      plan: null,
+      isPlanActive: false,
+      subscriptionPaymentId: null,
+      subscriptionStart: null,
+      planValidity: null,
+      unlockLimit: 0,
+      unlockFilter: { employer: null, isDeleted: { $ne: true } }
+    };
+  }
+
+  const plan = employer.currentPlan || null;
+  const planEndDate = employer.planValidity || plan?.endDate || null;
+
+  let isPlanActive = Boolean(plan);
+  if (plan && planEndDate) {
+    const planEndDateStr = String(planEndDate).toLowerCase();
+    if (planEndDateStr.includes('free') || planEndDateStr.includes('always')) {
+      isPlanActive = true;
+    } else {
+      const endTime = new Date(planEndDate).getTime();
+      if (!isNaN(endTime)) {
+        isPlanActive = endTime >= Date.now();
       }
     }
+  }
 
-    console.log('[DEBUG checkEmployerPlanAccess] Plan details', {
-      employer: employer.companyName || employer.login,
-      planName: plan.planName,
-      planEndDate,
-      isPlanActive,
-      showContactDetails: plan.showContactDetails,
-      allowResumeDownload: plan.allowResumeDownload
-    });
+  let subscriptionPaymentId = employer.currentPayment || null;
+  let subscriptionStart = employer.planStartDate || null;
 
-    if (!isPlanActive) {
+  if (plan) {
+    const latestPayment = await Payment.findOne({
+      $or: [
+        { customer: employer._id },
+        { login: userId }
+      ],
+      paymentStatus: 'Success',
+      isDeleted: { $ne: true }
+    }).sort({ paymentDate: -1, createDate: -1 }).lean();
+
+    if (latestPayment) {
+      if (!subscriptionPaymentId) subscriptionPaymentId = latestPayment._id;
+      if (!subscriptionStart) {
+        subscriptionStart = latestPayment.validFrom || latestPayment.paymentDate || latestPayment.createDate || null;
+      }
+    }
+  }
+
+  if (!subscriptionStart) {
+    subscriptionStart = employer.createDate || employer.updateDate || null;
+  }
+
+  const planId = plan?._id || null;
+  const unlockLimit = getUnlockLimit(plan);
+
+  const unlockFilter = {
+    employer: employer._id,
+    isDeleted: { $ne: true }
+  };
+
+  if (subscriptionPaymentId) {
+    unlockFilter.$or = [
+      { payment: subscriptionPaymentId },
+      {
+        plan: planId,
+        ...(subscriptionStart ? { createDate: { $gte: new Date(subscriptionStart) } } : {})
+      }
+    ];
+  } else if (subscriptionStart) {
+    unlockFilter.plan = planId;
+    unlockFilter.createDate = { $gte: new Date(subscriptionStart) };
+  } else {
+    unlockFilter.plan = planId;
+  }
+
+  return {
+    employer,
+    plan,
+    isPlanActive,
+    subscriptionPaymentId,
+    subscriptionStart,
+    planValidity: planEndDate,
+    unlockLimit,
+    unlockFilter
+  };
+};
+
+const checkEmployerPlanAccess = async (userId, candidateId = null, jobId = null) => {
+  try {
+    const ctx = await getEmployerActiveSubscriptionContext(userId);
+    const { employer, plan, isPlanActive, subscriptionPaymentId, subscriptionStart, unlockLimit, unlockFilter } = ctx;
+
+    if (!employer || !plan || !isPlanActive) {
       return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
     }
 
-    const unlockLimit = getUnlockLimit(plan);
     const planId = plan._id || null;
-
     const hasAccess = Boolean(plan.showContactDetails || plan.allowResumeDownload || unlockLimit > 0);
     if (!hasAccess) {
       return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
@@ -142,25 +211,17 @@ const checkEmployerPlanAccess = async (userId, candidateId = null, jobId = null)
 
     let isUnlocked = false;
     if (candidateId) {
-      const unlockFilter = {
-        employer: employer._id,
-        candidate: candidateId,
-        plan: planId,
-        isDeleted: { $ne: true }
-      };
-      const existing = await EmployerResumeUnlock.findOne(unlockFilter);
+      const existing = await EmployerResumeUnlock.findOne({
+        ...unlockFilter,
+        candidate: candidateId
+      });
       if (existing) {
         isUnlocked = true;
       }
     }
 
-    const usedUnlocks = await EmployerResumeUnlock.countDocuments({
-      employer: employer._id,
-      plan: planId,
-      isDeleted: { $ne: true }
-    });
-
-    const unlockLimitExhausted = usedUnlocks >= unlockLimit;
+    const usedUnlocks = await EmployerResumeUnlock.countDocuments(unlockFilter);
+    const unlockLimitExhausted = Number.isFinite(unlockLimit) ? usedUnlocks >= unlockLimit : false;
 
     return {
       hasCandidateAccess: true,
@@ -168,6 +229,8 @@ const checkEmployerPlanAccess = async (userId, candidateId = null, jobId = null)
       isUnlocked,
       employerId: employer._id,
       planId,
+      paymentId: subscriptionPaymentId,
+      subscriptionStart,
       unlockLimit,
       usedUnlocks
     };
@@ -241,14 +304,6 @@ const getPlanEndDate = (plan, startDate = new Date()) => {
   };
 
   return addDays(startDate, validityDays[plan?.planValidity] || 30);
-};
-
-const getUnlockLimit = (plan) => {
-  const rawValue = String(plan?.unlockCount || '').trim();
-  if (!rawValue) return 0;
-  if (/unlimited/i.test(rawValue)) return Number.POSITIVE_INFINITY;
-  const parsed = Number(rawValue.replace(/[^\d]/g, ''));
-  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const getEmployerPlanUsage = async ({ userId, employerId, plan, allJobs = null, billingHistory = null }) => {
@@ -555,8 +610,13 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
 
 const getJobDisplayStatus = (job) => {
   if (job.publishStatus === 'draft' || job.status === 'pending') return 'Draft';
-  const remainingDays = daysFromToday(job.jobExpiry);
+  const effectiveExpiry = job.jobExpiry || job.planValidity || null;
+  const remainingDays = daysFromToday(effectiveExpiry);
   if (job.status === 'expired' || (remainingDays !== null && remainingDays < 0)) return 'Expired';
+  if (job.planValidity) {
+    const planEnd = new Date(job.planValidity).getTime();
+    if (!isNaN(planEnd) && planEnd < Date.now()) return 'Expired';
+  }
   if (job.status === 'closed' || job.status === 'paused') return 'Closed';
   if (job.status === 'inactive') return 'Inactive';
   return 'Active';
@@ -711,19 +771,32 @@ exports.getEmployerCandidates = async (req, res) => {
 
     let unlockedCandidateIds = new Set();
     if (access.hasCandidateAccess && access.employerId) {
-      const unlocks = await EmployerResumeUnlock.find({
+      const unlockFilter = {
         employer: access.employerId,
-        plan: access.planId,
         isDeleted: { $ne: true }
-      }).select('candidate');
+      };
+      if (access.paymentId) {
+        unlockFilter.$or = [
+          { payment: access.paymentId },
+          {
+            plan: access.planId,
+            ...(access.subscriptionStart ? { createDate: { $gte: new Date(access.subscriptionStart) } } : {})
+          }
+        ];
+      } else if (access.subscriptionStart) {
+        unlockFilter.plan = access.planId;
+        unlockFilter.createDate = { $gte: new Date(access.subscriptionStart) };
+      } else {
+        unlockFilter.plan = access.planId;
+      }
+      const unlocks = await EmployerResumeUnlock.find(unlockFilter).select('candidate');
       unlockedCandidateIds = new Set(unlocks.map(u => String(u.candidate)));
     }
 
     let mapped = candidates.map((c, idx) => {
-      const isApplied = appliedCandidateIds.has(String(c._id));
-      const isUnlocked = isApplied || unlockedCandidateIds.has(String(c._id));
-      const showContacts = isApplied || (access.hasCandidateAccess && isUnlocked);
-      const allowDownload = isApplied || (access.hasCandidateAccess && isUnlocked);
+      const isUnlocked = unlockedCandidateIds.has(String(c._id));
+      const showContacts = access.hasCandidateAccess && isUnlocked;
+      const allowDownload = access.hasCandidateAccess && isUnlocked;
       const item = mapCandidate(c, idx, showContacts, allowDownload, access.hasCandidateAccess);
       item.isApplied = isApplied;
       item.isUnlocked = isUnlocked;
@@ -850,12 +923,7 @@ exports.getEmployerCandidateProfile = async (req, res) => {
       ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0))
       : 'Unlimited';
 
-    if (isApplicant) {
-      // Free for candidates who applied to employer's jobs! No unlock credit deducted.
-      showContacts = true;
-      allowDownload = true;
-      autoUnlocked = false;
-    } else if (access.hasCandidateAccess) {
+    if (access.hasCandidateAccess) {
       if (access.isUnlocked) {
         // Already unlocked under the active plan! Free unlimited views under same plan.
         showContacts = true;
@@ -867,7 +935,8 @@ exports.getEmployerCandidateProfile = async (req, res) => {
           login: userId,
           candidate: candidate._id,
           job: effectiveJobId,
-          plan: access.planId
+          plan: access.planId,
+          payment: access.paymentId || undefined
         }));
         showContacts = true;
         allowDownload = true;
@@ -1319,7 +1388,8 @@ exports.getEmployerApplicationDetails = async (req, res) => {
         login: req.user._id,
         candidate: candidateId,
         job: jobId,
-        plan: access.planId
+        plan: access.planId,
+        payment: access.paymentId || undefined
       }));
       autoUnlocked = true;
       remainingUnlocks = Number.isFinite(access.unlockLimit)
@@ -1475,7 +1545,8 @@ exports.downloadCandidateResume = async (req, res) => {
           employer: access.employerId,
           login: userId,
           candidate: candidateId,
-          plan: access.planId
+          plan: access.planId,
+          payment: access.paymentId || undefined
         }));
         isNewUnlock = true;
         remaining = Number.isFinite(access.unlockLimit)
@@ -2435,12 +2506,9 @@ exports.getEmployerDashboard = async (req, res) => {
     const isUnlimitedUnlocks = String(unlockLimitRaw).toLowerCase() === 'unlimited';
     const unlockLimit = isUnlimitedUnlocks ? Number.MAX_SAFE_INTEGER : Number(unlockLimitRaw) || 0;
 
+    const subCtx = await getEmployerActiveSubscriptionContext(userId, employer);
     const unlocksUsed = employer
-      ? await EmployerResumeUnlock.countDocuments({
-          employer: employer._id,
-          plan: plan?._id || null,
-          isDeleted: { $ne: true }
-        })
+      ? await EmployerResumeUnlock.countDocuments(subCtx.unlockFilter)
       : 0;
 
     const remainingUnlocks = isUnlimitedUnlocks
@@ -2697,12 +2765,9 @@ exports.getEmployerProfile = async (req, res) => {
     const unlockLimitRaw = effectivePlan?.unlockCount || '0';
     const isUnlimitedUnlocks = String(unlockLimitRaw).toLowerCase() === 'unlimited';
     const unlockLimit = isUnlimitedUnlocks ? Number.MAX_SAFE_INTEGER : Number(unlockLimitRaw) || 0;
+    const subCtx = await getEmployerActiveSubscriptionContext(userId, employer);
     const unlocksUsed = employer
-      ? await EmployerResumeUnlock.countDocuments({
-          employer: employer._id,
-          plan: effectivePlan?._id || null,
-          isDeleted: { $ne: true }
-        })
+      ? await EmployerResumeUnlock.countDocuments(subCtx.unlockFilter)
       : 0;
     const remainingUnlocks = isUnlimitedUnlocks
       ? 'Unlimited'
@@ -3073,12 +3138,9 @@ exports.getEmployerSubscription = async (req, res) => {
     const isUnlimitedUnlocks = String(unlockLimitRaw).toLowerCase() === 'unlimited';
     const unlockLimit = isUnlimitedUnlocks ? Number.MAX_SAFE_INTEGER : Number(unlockLimitRaw) || 0;
 
+    const subCtx = await getEmployerActiveSubscriptionContext(userId, employer);
     const unlocksUsed = employer
-      ? await EmployerResumeUnlock.countDocuments({
-          employer: employer._id,
-          plan: effectivePlan?._id || null,
-          isDeleted: { $ne: true }
-        })
+      ? await EmployerResumeUnlock.countDocuments(subCtx.unlockFilter)
       : 0;
 
     const remainingUnlocks = isUnlimitedUnlocks
@@ -3157,15 +3219,7 @@ exports.selectEmployerPlan = async (req, res) => {
     const validTill = getPlanEndDate(plan, validFrom);
     const amount = Number(plan.cost) || 0;
 
-    await Employer.findByIdAndUpdate(
-      employer._id,
-      addAuditOnUpdate(req, {
-        currentPlan: plan._id,
-        planValidity: validTill
-      })
-    );
-
-    await Payment.create(addAuditOnCreate(req, {
+    const payment = await Payment.create(addAuditOnCreate(req, {
       paymentId: await getNextPaymentId(),
       invoiceNo: await getNextInvoiceNo(),
       paymentDate: validFrom,
@@ -3190,6 +3244,16 @@ exports.selectEmployerPlan = async (req, res) => {
       remarks: 'Employer selected plan from subscription page.',
       recordedBy: 'Employer Portal'
     }));
+
+    await Employer.findByIdAndUpdate(
+      employer._id,
+      addAuditOnUpdate(req, {
+        currentPlan: plan._id,
+        planValidity: validTill,
+        planStartDate: validFrom,
+        currentPayment: payment._id
+      })
+    );
     await ensureEmployerAutoMailSetting({ employer: { ...employer, currentPlan: plan._id }, plan, resetUsage: true });
 
     res.json({ message: `${plan.planName} activated successfully.` });
@@ -3668,6 +3732,7 @@ exports.createEmployerJob = async (req, res) => {
     }
 
     const planEndDate = employer?.planValidity || activePlan?.endDate || null;
+    const finalJobExpiry = jobExpiry || planEndDate || null;
     if (jobExpiry && planEndDate) {
       const jobExpiryDate = new Date(jobExpiry);
       const planEnd = new Date(planEndDate);
@@ -3720,7 +3785,7 @@ exports.createEmployerJob = async (req, res) => {
       noticePeriod: noticePeriod || '',
       joiningDate: joiningDate || null,
       shiftTiming: shiftTiming || '',
-      jobExpiry: jobExpiry || null,
+      jobExpiry: finalJobExpiry,
       benefits: benefits || '',
       aboutCompany: aboutCompany || '',
       skills: splitList(skills),
@@ -3737,7 +3802,7 @@ exports.createEmployerJob = async (req, res) => {
       email: email || req.user.email,
       phone: phone || employer?.phone || req.user.phone || 'N/A',
       currentPlan: currentPlan || employer?.currentPlan || req.user.selectedPlan || null,
-      planValidity: planValidity || jobExpiry || employer?.planValidity || null,
+      planValidity: planValidity || finalJobExpiry || planEndDate || null,
       status: initialStatus,
       statusUpdatedBy: userId,
       statusUpdatedAt: new Date(),
@@ -5008,7 +5073,8 @@ exports.unlockCandidateProfile = async (req, res) => {
       employer: access.employerId,
       login: userId,
       candidate: candidateId,
-      plan: access.planId
+      plan: access.planId,
+      payment: access.paymentId || undefined
     }));
 
     const remainingUnlocks = Number.isFinite(access.unlockLimit)

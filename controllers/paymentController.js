@@ -236,7 +236,9 @@ exports.createPayment = async (req, res) => {
     if (newPayment.userType === 'Employer' && newPayment.paymentStatus === 'Success' && customerDetails?.id && planDoc?._id) {
       await Employer.findByIdAndUpdate(customerDetails.id, addAuditOnUpdate(req, {
         currentPlan: planDoc._id,
-        planValidity: validTill
+        planValidity: validTill,
+        planStartDate: validFrom,
+        currentPayment: newPayment._id
       }));
       await ensureEmployerAutoMailSetting({
         employer: { _id: customerDetails.id, userId: customerDetails.userId, login: customerDetails.userId, currentPlan: planDoc._id },
@@ -320,6 +322,15 @@ exports.updatePaymentStatus = async (req, res) => {
 
     if (!updated) {
       return res.status(404).json({ message: 'Payment not found.' });
+    }
+
+    if (updated.paymentStatus === 'Success' && updated.userType === 'Employer' && updated.customer && updated.plan) {
+      await Employer.findByIdAndUpdate(updated.customer, addAuditOnUpdate(req, {
+        currentPlan: updated.plan,
+        planValidity: updated.validTill,
+        planStartDate: updated.validFrom || updated.paymentDate,
+        currentPayment: updated._id
+      }));
     }
 
     res.json(updated);

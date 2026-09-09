@@ -170,14 +170,20 @@ exports.getPublicEmployerDetail = async (req, res) => {
       if (job.status === 'closed') return 'Closed';
       if (job.status === 'inactive') return 'Inactive';
       if (job.publishStatus === 'draft' || job.status === 'pending') return 'Draft';
-      const isExpired = Boolean(job.jobExpiry && new Date(job.jobExpiry) < now);
+      const isExpired = Boolean(
+        (job.jobExpiry && new Date(job.jobExpiry) < now) ||
+        (job.planValidity && new Date(job.planValidity) < now)
+      );
       if (isExpired) return 'Expired';
       if (job.status === 'featured') return 'Featured';
       return 'Active';
     };
 
     const openJobsCount = jobs.filter((job) => {
-      const isExpired = Boolean(job.jobExpiry && new Date(job.jobExpiry) < now);
+      const isExpired = Boolean(
+        (job.jobExpiry && new Date(job.jobExpiry) < now) ||
+        (job.planValidity && new Date(job.planValidity) < now)
+      );
       return !isExpired && ['active', 'featured'].includes(job.status);
     }).length;
 
@@ -240,8 +246,10 @@ exports.getPublicEmployerDetail = async (req, res) => {
       jobs: jobs.map((job) => {
         const status = getJobDisplayStatus(job);
         const jobIdStr = job._id ? job._id.toString() : '';
-        const appStatus = candidateApplicationsMap[jobIdStr] || null;
-        const isExpired = Boolean(job.jobExpiry && new Date(job.jobExpiry) < now);
+        const isExpired = Boolean(
+          (job.jobExpiry && new Date(job.jobExpiry) < now) ||
+          (job.planValidity && new Date(job.planValidity) < now)
+        );
 
         return {
           id: job.slug || job._id,
