@@ -132,13 +132,13 @@ const checkEmployerPlanAccess = async (userId, candidateId = null, jobId = null)
       return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
     }
 
-    const hasAccess = Boolean(plan.showContactDetails || plan.allowResumeDownload);
+    const unlockLimit = getUnlockLimit(plan);
+    const planId = plan._id || null;
+
+    const hasAccess = Boolean(plan.showContactDetails || plan.allowResumeDownload || unlockLimit > 0);
     if (!hasAccess) {
       return { hasCandidateAccess: false, unlockLimitExhausted: false, isUnlocked: false };
     }
-
-    const unlockLimit = getUnlockLimit(plan);
-    const planId = plan._id || null;
 
     let isUnlocked = false;
     if (candidateId) {
@@ -148,9 +148,6 @@ const checkEmployerPlanAccess = async (userId, candidateId = null, jobId = null)
         plan: planId,
         isDeleted: { $ne: true }
       };
-      if (jobId) {
-        unlockFilter.job = jobId;
-      }
       const existing = await EmployerResumeUnlock.findOne(unlockFilter);
       if (existing) {
         isUnlocked = true;
@@ -549,6 +546,7 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     avatarTone: ['from-rose-200 to-amber-200', 'from-blue-200 to-red-200', 'from-pink-200 to-slate-300', 'from-yellow-200 to-orange-200', 'from-sky-200 to-slate-200', 'from-amber-200 to-emerald-200', 'from-purple-200 to-pink-200'][index % 7],
     isPremium: Boolean(candidate.currentPlan),
     isRecent,
+    isUnlocked: Boolean(showContacts),
     resume: allowDownload ? (candidate.resume || '') : '',
     hasResume: Boolean(candidate.resume),
     allowResumeDownload: allowDownload
@@ -704,6 +702,13 @@ exports.getEmployerCandidates = async (req, res) => {
       .lean();
 
     const access = await checkEmployerPlanAccess(req.user._id);
+
+    // Candidates who applied to any job posted by this employer are automatically visible
+    const employerJobs = await Job.find({ login: req.user._id, isDeleted: { $ne: true } }).select('_id');
+    const employerJobIds = employerJobs.map(job => job._id);
+    const employerApplications = await Application.find({ job: { $in: employerJobIds } }).select('candidate');
+    const appliedCandidateIds = new Set(employerApplications.map(a => String(a.candidate)));
+
     let unlockedCandidateIds = new Set();
     if (access.hasCandidateAccess && access.employerId) {
       const unlocks = await EmployerResumeUnlock.find({
@@ -715,10 +720,14 @@ exports.getEmployerCandidates = async (req, res) => {
     }
 
     let mapped = candidates.map((c, idx) => {
-      const isUnlocked = unlockedCandidateIds.has(String(c._id));
-      const showContacts = access.hasCandidateAccess && isUnlocked;
-      const allowDownload = access.hasCandidateAccess && isUnlocked;
-      return mapCandidate(c, idx, showContacts, allowDownload, access.hasCandidateAccess);
+      const isApplied = appliedCandidateIds.has(String(c._id));
+      const isUnlocked = isApplied || unlockedCandidateIds.has(String(c._id));
+      const showContacts = isApplied || (access.hasCandidateAccess && isUnlocked);
+      const allowDownload = isApplied || (access.hasCandidateAccess && isUnlocked);
+      const item = mapCandidate(c, idx, showContacts, allowDownload, access.hasCandidateAccess);
+      item.isApplied = isApplied;
+      item.isUnlocked = isUnlocked;
+      return item;
     });
     const rawSearch = String(query.search || '').trim().toLowerCase();
     const employmentTypes = splitList(query.employmentTypes);
@@ -794,7 +803,10 @@ exports.getEmployerCandidates = async (req, res) => {
         employmentTypes: [...new Set(candidates.map(item => item.jobType?.jobType).filter(Boolean))]
       },
       candidates: items,
-      pagination
+      pagination,
+      hasCandidateAccess: access.hasCandidateAccess,
+      unlockLimitExhausted: access.unlockLimitExhausted,
+      remainingUnlocks: Number.isFinite(access.unlockLimit) ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0)) : 'Unlimited'
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -826,10 +838,7 @@ exports.getEmployerCandidateProfile = async (req, res) => {
       TalentPool.findOne({ employerId: userId, candidateId: candidate._id, isDeleted: { $ne: true } }).lean()
     ]);
 
-    if (!application && !talentPoolItem) {
-      return res.status(403).json({ message: 'You are not allowed to view this candidate profile.' });
-    }
-
+    const isApplicant = Boolean(application);
     const requestedJobId = req.query.jobId || null;
     const effectiveJobId = requestedJobId || application?.job?._id || application?.job || null;
     const access = await checkEmployerPlanAccess(userId, candidate._id, effectiveJobId);
@@ -841,12 +850,18 @@ exports.getEmployerCandidateProfile = async (req, res) => {
       ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0))
       : 'Unlimited';
 
-    if (access.hasCandidateAccess) {
+    if (isApplicant) {
+      // Free for candidates who applied to employer's jobs! No unlock credit deducted.
+      showContacts = true;
+      allowDownload = true;
+      autoUnlocked = false;
+    } else if (access.hasCandidateAccess) {
       if (access.isUnlocked) {
+        // Already unlocked under the active plan! Free unlimited views under same plan.
         showContacts = true;
         allowDownload = true;
       } else if (!access.unlockLimitExhausted) {
-        // Automatically unlock for this job!
+        // Deduct 1 unlock count from current plan
         await EmployerResumeUnlock.create(addAuditOnCreate(req, {
           employer: access.employerId,
           login: userId,
@@ -871,10 +886,11 @@ exports.getEmployerCandidateProfile = async (req, res) => {
 
     res.json({
       ...mapped,
-      hasCandidateAccess: access.hasCandidateAccess,
-      unlockLimitExhausted: access.unlockLimitExhausted && !showContacts,
+      hasCandidateAccess: isApplicant || access.hasCandidateAccess,
+      unlockLimitExhausted: !isApplicant && access.unlockLimitExhausted && !showContacts,
       autoUnlocked,
       remainingUnlocks,
+      isApplied: isApplicant,
       phone: showContacts ? (candidate.phone || candidate.userId?.phone || '') : mapped.phone,
       designation: candidate.designation || mapped.role,
       bio: candidate.bio || `Experienced ${mapped.role} profile with ${mapped.experience} experience.`,
@@ -1432,14 +1448,54 @@ exports.getEmployerApplicationDetails = async (req, res) => {
 exports.downloadCandidateResume = async (req, res) => {
   try {
     const candidateId = req.params.id;
+    const userId = req.user._id;
 
     const candidate = await Jobseeker.findOne({ _id: candidateId, isDeleted: { $ne: true } }).select('resume name');
     if (!candidate?.resume) {
       return res.status(404).json({ message: 'Resume was not found for this candidate.' });
     }
 
+    const employerJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).select('_id');
+    const employerJobIds = employerJobs.map(j => j._id);
+    const application = await Application.findOne({ candidate: candidateId, job: { $in: employerJobIds } });
+
+    let isNewUnlock = false;
+    let remaining = 'Unlimited';
+
+    if (!application) {
+      const access = await checkEmployerPlanAccess(userId, candidateId);
+      if (!access.hasCandidateAccess) {
+        return res.status(403).json({ message: 'Upgrade Plan: Resume viewing is not supported under your current plan. Please upgrade to view resumes.' });
+      }
+      if (!access.isUnlocked) {
+        if (access.unlockLimitExhausted) {
+          return res.status(403).json({ message: 'Unlock Limit Exhausted: You have reached the resume unlock limit for your current plan. Please upgrade or renew your plan.' });
+        }
+        await EmployerResumeUnlock.create(addAuditOnCreate(req, {
+          employer: access.employerId,
+          login: userId,
+          candidate: candidateId,
+          plan: access.planId
+        }));
+        isNewUnlock = true;
+        remaining = Number.isFinite(access.unlockLimit)
+          ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0) - 1)
+          : 'Unlimited';
+      } else {
+        remaining = Number.isFinite(access.unlockLimit)
+          ? Math.max(0, Number(access.unlockLimit || 0) - Number(access.usedUnlocks || 0))
+          : 'Unlimited';
+      }
+    }
+
     const filename = path.basename(String(candidate.resume).split('?')[0]);
     const downloadName = getResumeDownloadName(candidate.resume, candidate.name);
+
+    if (isNewUnlock) {
+      res.setHeader('X-Is-New-Unlock', 'true');
+      res.setHeader('X-Remaining-Unlocks', String(remaining));
+    }
+
     const attachment = await Attachment.findOne({ filename });
     if (attachment) {
       const fileBuffer = toFileBuffer(attachment.data);
@@ -3159,6 +3215,13 @@ exports.getEmployerJobForm = async (req, res) => {
     const districtByDid = new Map(districts.map(item => [item.did, item]));
     const countryByCid = new Map(countries.map(item => [item.cid, item]));
 
+    const plan = employer?.currentPlan || null;
+    const defaultPlan = !plan && req.user.selectedPlan
+      ? await Plan.findById(req.user.selectedPlan).lean()
+      : null;
+    const effectivePlan = plan || defaultPlan;
+    const effectivePlanValidity = employer?.planValidity || effectivePlan?.endDate || null;
+
     res.json({
       employer: employer ? {
         companyName: employer.companyName,
@@ -3170,7 +3233,8 @@ exports.getEmployerJobForm = async (req, res) => {
         district: employer.district,
         city: employer.city,
         currentPlan: employer.currentPlan?._id || employer.currentPlan || req.user.selectedPlan || null,
-        planValidity: formatDate(employer.planValidity)
+        planValidity: formatDate(effectivePlanValidity),
+        planExpiryDate: formatDate(effectivePlanValidity)
       } : {
         companyName: req.user.companyName || '',
         contactPerson: `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
@@ -3181,7 +3245,8 @@ exports.getEmployerJobForm = async (req, res) => {
         district: '',
         city: '',
         currentPlan: req.user.selectedPlan || null,
-        planValidity: null
+        planValidity: defaultPlan?.endDate ? formatDate(defaultPlan.endDate) : null,
+        planExpiryDate: defaultPlan?.endDate ? formatDate(defaultPlan.endDate) : null
       },
       countries: countries.map(item => ({ id: item._id, cid: item.cid, name: item.countryName })),
       states: states.map(item => ({ id: item._id, cid: item.cid, sid: item.sid, name: item.stateName })),
@@ -3256,7 +3321,7 @@ exports.previewEmployerJob = async (req, res) => {
 exports.updateEmployerJob = async (req, res) => {
   try {
     const userId = req.user._id;
-    const employer = await Employer.findOne({ $or: [{ userId }, { login: userId }], isDeleted: { $ne: true } });
+    const employer = await Employer.findOne({ $or: [{ userId }, { login: userId }], isDeleted: { $ne: true } }).populate('currentPlan');
     const existingJob = await Job.findOne({ _id: req.params.id, login: userId, isDeleted: { $ne: true } });
 
     if (!existingJob) {
@@ -3265,10 +3330,9 @@ exports.updateEmployerJob = async (req, res) => {
 
     const remainingDays = daysFromToday(existingJob.jobExpiry);
     const isExpired = existingJob.status === 'expired' || (remainingDays !== null && remainingDays < 0);
-    const isInactive = existingJob.status === 'inactive';
 
-    if (isExpired || isInactive) {
-      return res.status(400).json({ message: 'Inactive or expired jobs cannot be edited.' });
+    if (existingJob.status !== 'active' || isExpired) {
+      return res.status(400).json({ message: 'Only active jobs can be edited.' });
     }
 
     const {
@@ -3316,6 +3380,24 @@ exports.updateEmployerJob = async (req, res) => {
 
     if (!jobTitle || !jobCategory || !jobType || !vacancies || !(description || detailedDescription || jobSummary) || !(experience || requiredExperience)) {
       return res.status(400).json({ message: 'Please fill all required job details.' });
+    }
+
+    const planId = employer?.currentPlan?._id || employer?.currentPlan || req.user.selectedPlan || null;
+    const activePlan = employer?.currentPlan?.planName
+      ? employer.currentPlan
+      : (planId ? await Plan.findOne({ _id: planId, isDeleted: { $ne: true } }).lean() : null);
+    const planEndDate = employer?.planValidity || activePlan?.endDate || null;
+
+    if (jobExpiry && planEndDate) {
+      const jobExpiryDate = new Date(jobExpiry);
+      const planEnd = new Date(planEndDate);
+      planEnd.setHours(23, 59, 59, 999);
+      if (jobExpiryDate.getTime() > planEnd.getTime()) {
+        const formattedPlanDate = new Date(planEndDate).toISOString().split('T')[0];
+        return res.status(400).json({
+          message: `Job expiry date cannot exceed your current plan expiry date (${formattedPlanDate}).`
+        });
+      }
     }
 
     const finalPublishStatus = publishStatus || status || existingJob.publishStatus || 'publish';
@@ -3446,8 +3528,8 @@ exports.updateEmployerJobAction = async (req, res) => {
     const isExpired = job.status === 'expired' || (remainingDays !== null && remainingDays < 0);
 
     if (action === 'pause' || action === 'close') {
-      if (job.status === 'inactive' || isExpired) {
-        return res.status(400).json({ message: 'Cannot close an inactive or expired job.' });
+      if (job.status !== 'active' || isExpired) {
+        return res.status(400).json({ message: 'Only active jobs can be closed.' });
       }
       job.status = 'closed';
     }
@@ -3583,6 +3665,19 @@ exports.createEmployerJob = async (req, res) => {
 
     if (!jobTitle || !jobCategory || !jobType || !vacancies || !(description || detailedDescription || jobSummary) || !(experience || requiredExperience)) {
       return res.status(400).json({ message: 'Please fill all required job details.' });
+    }
+
+    const planEndDate = employer?.planValidity || activePlan?.endDate || null;
+    if (jobExpiry && planEndDate) {
+      const jobExpiryDate = new Date(jobExpiry);
+      const planEnd = new Date(planEndDate);
+      planEnd.setHours(23, 59, 59, 999);
+      if (jobExpiryDate.getTime() > planEnd.getTime()) {
+        const formattedPlanDate = new Date(planEndDate).toISOString().split('T')[0];
+        return res.status(400).json({
+          message: `Job expiry date cannot exceed your current plan expiry date (${formattedPlanDate}).`
+        });
+      }
     }
 
     const finalPublishStatus = publishStatus || status || 'publish';
@@ -4802,6 +4897,136 @@ exports.sendOfferLetter = async (req, res) => {
       sentOffer
     });
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.initiateCandidateContact = async (req, res) => {
+  try {
+    const candidateId = req.params.id;
+    const userId = req.user._id;
+
+    const candidate = await Jobseeker.findOne({ _id: candidateId, isDeleted: { $ne: true } });
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found.' });
+    }
+
+    const employerJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).sort({ createDate: -1 });
+    if (!employerJobs.length) {
+      return res.status(400).json({ message: 'Please post a job before contacting candidates.' });
+    }
+
+    const employerJobIds = employerJobs.map(j => j._id);
+    let application = await Application.findOne({ candidate: candidateId, job: { $in: employerJobIds } });
+
+    if (!application) {
+      const targetJob = employerJobs.find(j => j.status === 'active' && j.publishStatus === 'publish') || employerJobs[0];
+      application = await Application.create(addAuditOnCreate(req, {
+        candidate: candidateId,
+        job: targetJob._id,
+        status: 'Shortlisted'
+      }));
+    }
+
+    return res.json({
+      success: true,
+      applicationId: application._id
+    });
+  } catch (error) {
+    console.error('initiateCandidateContact Error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.unlockCandidateProfile = async (req, res) => {
+  try {
+    const candidateId = req.params.id;
+    const userId = req.user._id;
+
+    const candidate = await Jobseeker.findOne({ _id: candidateId, isDeleted: { $ne: true } })
+      .populate('userId', 'email phone firstName lastName')
+      .populate('qualification', 'name')
+      .populate('industryType', 'industryType name industryName')
+      .populate('jobCategory', 'categoryName')
+      .populate('jobType', 'jobType')
+      .populate('currentPlan', 'planName');
+
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found.' });
+    }
+
+    // Check if candidate is applicant to employer's jobs
+    const employerJobs = await Job.find({ login: userId, isDeleted: { $ne: true } }).select('_id');
+    const employerJobIds = employerJobs.map(j => j._id);
+    const application = await Application.findOne({ candidate: candidateId, job: { $in: employerJobIds } });
+
+    if (application) {
+      const mapped = mapCandidate(candidate, 0, true, true, true);
+      mapped.isApplied = true;
+      mapped.isUnlocked = true;
+      return res.json({
+        success: true,
+        isUnlocked: true,
+        alreadyUnlocked: true,
+        message: 'This candidate applied to your job and is already unlocked.',
+        candidate: mapped
+      });
+    }
+
+    const access = await checkEmployerPlanAccess(userId, candidateId);
+    if (!access.hasCandidateAccess) {
+      return res.status(403).json({
+        success: false,
+        hasCandidateAccess: false,
+        message: 'Upgrade Plan: Profile unlocking is not available under your current plan. Please upgrade to view candidate details.'
+      });
+    }
+
+    if (access.isUnlocked) {
+      const mapped = mapCandidate(candidate, 0, true, true, true);
+      mapped.isUnlocked = true;
+      return res.json({
+        success: true,
+        isUnlocked: true,
+        alreadyUnlocked: true,
+        message: 'Candidate is already unlocked under your current plan.',
+        remainingUnlocks: Number.isFinite(access.unlockLimit) ? Math.max(0, access.unlockLimit - access.usedUnlocks) : 'Unlimited',
+        candidate: mapped
+      });
+    }
+
+    if (access.unlockLimitExhausted) {
+      return res.status(403).json({
+        success: false,
+        unlockLimitExhausted: true,
+        message: 'Unlock Limit Exhausted: You have reached the unlock limit for your current plan. Please upgrade or renew your plan.'
+      });
+    }
+
+    // Deduct 1 unlock credit under the current active plan
+    await EmployerResumeUnlock.create(addAuditOnCreate(req, {
+      employer: access.employerId,
+      login: userId,
+      candidate: candidateId,
+      plan: access.planId
+    }));
+
+    const remainingUnlocks = Number.isFinite(access.unlockLimit)
+      ? Math.max(0, access.unlockLimit - access.usedUnlocks - 1)
+      : 'Unlimited';
+
+    const mapped = mapCandidate(candidate, 0, true, true, true);
+    mapped.isUnlocked = true;
+
+    return res.json({
+      success: true,
+      isUnlocked: true,
+      isNewUnlock: true,
+      remainingUnlocks,
+      candidate: mapped
+    });
+  } catch (error) {
+    console.error('unlockCandidateProfile Error:', error);
     res.status(500).json({ message: error.message });
   }
 };
