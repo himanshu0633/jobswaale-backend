@@ -4646,22 +4646,39 @@ exports.updateEmployerSettings = async (req, res) => {
 exports.submitSupportTicket = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { subject, priority, message, attachment } = req.body;
+    const { subject, category, priority, message, attachment, attachmentOriginalName } = req.body;
 
     if (!subject || !message) {
       return res.status(400).json({ message: 'Subject and details are required.' });
     }
 
+    const randomNum = Math.floor(100000 + Math.random() * 900000);
+    const ticketId = `TICK-${randomNum}`;
+
     const ticket = await SupportTicket.create({
       userId,
+      ticketId,
       email: req.user.email,
-      subject,
+      category: category || 'General',
+      subject: subject.trim(),
       priority: priority || 'Medium',
-      message,
-      attachment: attachment || ''
+      message: message.trim(),
+      attachment: attachment || '',
+      attachmentOriginalName: attachmentOriginalName || '',
+      status: 'open',
+      responses: [
+        {
+          sender: 'user',
+          senderName: req.user.name || 'Employer',
+          message: message.trim(),
+          attachment: attachment || '',
+          createdAt: new Date()
+        }
+      ]
     });
 
     res.status(201).json({
+      success: true,
       message: 'Support ticket submitted successfully.',
       ticket
     });
@@ -4669,6 +4686,163 @@ exports.submitSupportTicket = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// Get All Support Tickets for Logged-in Employer
+exports.getSupportTickets = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { status, priority, search } = req.query;
+
+    const filter = { userId };
+
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+
+    if (priority && priority !== 'all') {
+      filter.priority = priority;
+    }
+
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      filter.$or = [
+        { ticketId: searchRegex },
+        { subject: searchRegex },
+        { category: searchRegex },
+        { message: searchRegex }
+      ];
+    }
+
+    const tickets = await SupportTicket.find(filter)
+      .sort({ createDate: -1 })
+      .lean();
+
+    // Compute summary stats
+    const allUserTickets = await SupportTicket.find({ userId }).select('status').lean();
+    const stats = {
+      total: allUserTickets.length,
+      open: allUserTickets.filter(t => t.status === 'open').length,
+      inProgress: allUserTickets.filter(t => t.status === 'in-progress').length,
+      resolved: allUserTickets.filter(t => t.status === 'resolved').length,
+      closed: allUserTickets.filter(t => t.status === 'closed').length
+    };
+
+    res.status(200).json({
+      success: true,
+      stats,
+      tickets
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Get Single Support Ticket Details
+exports.getSupportTicketById = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { id } = req.params;
+
+    const ticket = await SupportTicket.findOne({
+      $and: [
+        { userId },
+        { $or: [{ _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }, { ticketId: id }] }
+      ]
+    }).lean();
+
+    if (!ticket) {
+      return res.status(404).json({ message: 'Support ticket not found.' });
+    }
+
+    res.status(200).json({
+      success: true,
+      ticket
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Send Reply / Follow-up Message on Ticket
+exports.replySupportTicket = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { id } = req.params;
+    const { message, attachment, attachmentOriginalName } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ message: 'Message content is required.' });
+    }
+
+    const ticket = await SupportTicket.findOne({
+      $and: [
+        { userId },
+        { $or: [{ _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }, { ticketId: id }] }
+      ]
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ message: 'Support ticket not found.' });
+    }
+
+    const reply = {
+      sender: 'user',
+      senderName: req.user.name || 'Employer',
+      message: message.trim(),
+      attachment: attachment || '',
+      createdAt: new Date()
+    };
+
+    ticket.responses.push(reply);
+
+    // If ticket was closed or resolved, reopen it since employer replied
+    if (ticket.status === 'closed' || ticket.status === 'resolved') {
+      ticket.status = 'open';
+    }
+
+    await ticket.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Reply sent successfully.',
+      ticket
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Close Ticket by Employer
+exports.closeSupportTicket = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { id } = req.params;
+
+    const ticket = await SupportTicket.findOneAndUpdate(
+      {
+        $and: [
+          { userId },
+          { $or: [{ _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }, { ticketId: id }] }
+        ]
+      },
+      { status: 'closed' },
+      { new: true }
+    );
+
+    if (!ticket) {
+      return res.status(404).json({ message: 'Support ticket not found.' });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Support ticket marked as closed.',
+      ticket
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 
 // Get Employer Email Templates
 exports.getEmailTemplates = async (req, res) => {

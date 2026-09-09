@@ -50,6 +50,10 @@ const {
   updateEmployerSettings,
   updateEmployerAutoMailSettings,
   submitSupportTicket,
+  getSupportTickets,
+  getSupportTicketById,
+  replySupportTicket,
+  closeSupportTicket,
   getEmailTemplates,
   createEmailTemplate,
   updateEmailTemplate,
@@ -122,6 +126,10 @@ router.get('/settings', getEmployerSettings);
 router.put('/settings', updateEmployerSettings);
 
 // Support Ticket routes
+router.get('/support/tickets', getSupportTickets);
 router.post('/support/ticket', submitSupportTicket);
+router.get('/support/tickets/:id', getSupportTicketById);
+router.post('/support/tickets/:id/reply', replySupportTicket);
+router.patch('/support/tickets/:id/close', closeSupportTicket);
 
 module.exports = router;
