@@ -795,6 +795,7 @@ exports.getEmployerCandidates = async (req, res) => {
 
     let mapped = candidates.map((c, idx) => {
       const isUnlocked = unlockedCandidateIds.has(String(c._id));
+      const isApplied = appliedCandidateIds.has(String(c._id));
       const showContacts = access.hasCandidateAccess && isUnlocked;
       const allowDownload = access.hasCandidateAccess && isUnlocked;
       const item = mapCandidate(c, idx, showContacts, allowDownload, access.hasCandidateAccess);
