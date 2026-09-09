@@ -4448,7 +4448,9 @@ exports.getEmployerSettings = async (req, res) => {
         department: employer.department || '',
         altEmail: employer.altEmail || '',
         bio: employer.bio || '',
-        companyBanner: employer.bannerImage || ''
+        companyBanner: employer.bannerImage || '',
+        logo: employer.logo || req.user.profileImage || '',
+        profileImage: employer.logo || req.user.profileImage || ''
       },
       settings: employer.settings || {
         notifications: {
@@ -4519,6 +4521,9 @@ exports.updateEmployerSettings = async (req, res) => {
       user.lastName = parts.slice(1).join(' ') || '';
       user.designation = profile.jobTitle || '';
       if (profile.phone) user.phone = profile.phone;
+      if (profile.logo !== undefined || profile.profileImage !== undefined) {
+        user.profileImage = profile.logo || profile.profileImage || '';
+      }
       await user.save();
 
       employer.phone = profile.phone || employer.phone;
@@ -4527,6 +4532,9 @@ exports.updateEmployerSettings = async (req, res) => {
       employer.altEmail = profile.altEmail || '';
       employer.bio = profile.bio || '';
       if (profile.companyBanner !== undefined) employer.bannerImage = profile.companyBanner || '';
+      if (profile.logo !== undefined || profile.profileImage !== undefined) {
+        employer.logo = profile.logo || profile.profileImage || '';
+      }
       await employer.save();
 
       return res.json({
@@ -4540,7 +4548,9 @@ exports.updateEmployerSettings = async (req, res) => {
           designation: user.designation,
           companyName: employer.companyName,
           accountType: user.accountType,
-          role: user.role
+          role: user.role,
+          profileImage: user.profileImage || employer.logo || '',
+          logo: employer.logo || user.profileImage || ''
         }
       });
     }
