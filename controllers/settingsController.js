@@ -13,6 +13,7 @@ exports.getSettings = async (req, res) => {
 exports.getPublicSettings = async (req, res) => {
   try {
     const settings = await getSettings();
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.json(getPublicSettings(settings));
   } catch (error) {
     res.status(500).json({ message: error.message });
