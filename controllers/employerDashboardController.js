@@ -3393,11 +3393,13 @@ exports.updateEmployerJob = async (req, res) => {
       return res.status(404).json({ message: 'Job not found.' });
     }
 
+    const displayStatus = getJobDisplayStatus(existingJob);
+    const isDraft = displayStatus === 'Draft' || existingJob.publishStatus === 'draft' || existingJob.status === 'pending';
     const remainingDays = daysFromToday(existingJob.jobExpiry);
-    const isExpired = existingJob.status === 'expired' || (remainingDays !== null && remainingDays < 0);
+    const isExpired = displayStatus === 'Expired' || existingJob.status === 'expired' || (remainingDays !== null && remainingDays < 0);
 
-    if (existingJob.status !== 'active' || isExpired) {
-      return res.status(400).json({ message: 'Only active jobs can be edited.' });
+    if ((existingJob.status !== 'active' && !isDraft) || isExpired) {
+      return res.status(400).json({ message: 'Only active or draft jobs can be edited.' });
     }
 
     const {
@@ -3532,7 +3534,26 @@ exports.updateEmployerJob = async (req, res) => {
       { new: true }
     );
 
-    res.json({ message: 'Job updated successfully.', job: updatedJob });
+    if (updatedJob.status === 'active' && existingJob.status !== 'active') {
+      const { sendJobPostedEmail, notifyMatchingJobseekers } = require('../utils/jobNotifications');
+      sendJobPostedEmail({
+        to: updatedJob.email || req.user.email,
+        employerName: updatedJob.contactPerson || updatedJob.companyName || req.user.firstName || 'Employer',
+        jobTitle: updatedJob.jobTitle,
+        recipientId: userId
+      }).catch(err => console.error('Failed to send job posted email:', err));
+
+      notifyMatchingJobseekers(updatedJob).catch(err => console.error('Failed to notify matching jobseekers:', err));
+    }
+
+    res.json({
+      message: finalPublishStatus === 'draft'
+        ? 'Draft updated successfully.'
+        : (requireApproval && updatedJob.status === 'inactive'
+            ? 'Job updated successfully. It will be activated after admin review.'
+            : 'Job updated successfully.'),
+      job: updatedJob
+    });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -3613,6 +3634,9 @@ exports.updateEmployerJobAction = async (req, res) => {
     }
 
     if (action === 'renew') {
+      if (isExpired) {
+        return res.status(400).json({ message: 'Expired jobs cannot be renewed.' });
+      }
       const baseDate = job.jobExpiry && new Date(job.jobExpiry) > new Date() ? job.jobExpiry : new Date();
       job.status = 'active';
       job.publishStatus = 'publish';
