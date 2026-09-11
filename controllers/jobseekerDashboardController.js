@@ -383,7 +383,13 @@ exports.getJobseekerDashboard = async (req, res) => {
       status: 'Offered',
       'selectionDetails.offerStatus': 'Hired'
     });
-    const rejectedCount = await Application.countDocuments({ candidate: seeker._id, status: 'Rejected' });
+    const rejectedCount = await Application.countDocuments({
+      candidate: seeker._id,
+      $or: [
+        { status: 'Rejected' },
+        { 'selectionDetails.offerStatus': 'Offer Declined' }
+      ]
+    });
     
     // Recent activities (applications)
     const recentApps = await Application.find({ candidate: seeker._id })
@@ -406,13 +412,18 @@ exports.getJobseekerDashboard = async (req, res) => {
         type = 'accepted';
         text = `Interview scheduled for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
       } else if (app.status === 'Offered') {
-        type = 'accepted';
-        if (app.selectionDetails?.offerStatus === 'Selected') {
-          text = `You were selected for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
-        } else if (app.selectionDetails?.offerStatus === 'Hired') {
-          text = `You were hired for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+        if (app.selectionDetails?.offerStatus === 'Offer Declined') {
+          type = 'rejected';
+          text = `Job offer for <strong>${app.job?.jobTitle || 'Open Position'}</strong> was declined`;
         } else {
-          text = `You received a job offer for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+          type = 'accepted';
+          if (app.selectionDetails?.offerStatus === 'Selected') {
+            text = `You were selected for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+          } else if (app.selectionDetails?.offerStatus === 'Hired') {
+            text = `You were hired for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+          } else {
+            text = `You received a job offer for <strong>${app.job?.jobTitle || 'Open Position'}</strong>`;
+          }
         }
       } else if (app.status === 'Rejected') {
         type = 'rejected';
