@@ -1120,6 +1120,14 @@ exports.getEmployerApplications = async (req, res) => {
       if (['Selected', 'Offer Sent', 'Offer Accepted', 'Offer Declined', 'Hired'].includes(status)) {
         return { status: 'Offered', 'selectionDetails.offerStatus': status };
       }
+      if (status === 'Rejected') {
+        return {
+          $or: [
+            { status: 'Rejected' },
+            { status: 'Offered', 'selectionDetails.offerStatus': 'Offer Declined' }
+          ]
+        };
+      }
       return { status };
     };
 
@@ -1223,7 +1231,8 @@ exports.getEmployerApplications = async (req, res) => {
         offerAccepted: statusCounts['Offer Accepted'] || 0,
         hired: statusCounts.Hired || 0,
         offerDeclined: statusCounts['Offer Declined'] || 0,
-        rejected: statusCounts.Rejected || 0
+        employerRejected: statusCounts.Rejected || 0,
+        rejected: (statusCounts.Rejected || 0) + (statusCounts['Offer Declined'] || 0)
       },
       pipeline: {
         applied: statusCounts.Applied || 0,
@@ -1232,7 +1241,7 @@ exports.getEmployerApplications = async (req, res) => {
         interview: statusCounts.Interview || 0,
         onHold: statusCounts.OnHold || 0,
         offered: statusCounts.Offered || 0,
-        rejected: statusCounts.Rejected || 0
+        rejected: (statusCounts.Rejected || 0) + (statusCounts['Offer Declined'] || 0)
       },
       filters: {
         jobTitles: [...new Set(scopedJobs.map(job => job.jobTitle).filter(Boolean))],
@@ -2540,7 +2549,13 @@ exports.getEmployerDashboard = async (req, res) => {
       Application.countDocuments({ job: { $in: jobIds }, status: 'Offered', 'selectionDetails.offerStatus': 'Hired' }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Interview', 'interviewDetails.onHold': { $ne: true } }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Reviewed' }),
-      Application.countDocuments({ job: { $in: jobIds }, status: 'Rejected' }),
+      Application.countDocuments({
+        job: { $in: jobIds },
+        $or: [
+          { status: 'Rejected' },
+          { status: 'Offered', 'selectionDetails.offerStatus': 'Offer Declined' }
+        ]
+      }),
       Application.countDocuments({ job: { $in: jobIds }, status: 'Interview', 'interviewDetails.onHold': true })
     ]);
 
@@ -2579,7 +2594,9 @@ exports.getEmployerDashboard = async (req, res) => {
           countMap[jobId].offered += item.count;
         }
       }
-      if (status === 'Rejected') countMap[jobId].rejected += item.count;
+      if (status === 'Rejected' || (status === 'Offered' && offerStatus === 'Offer Declined')) {
+        countMap[jobId].rejected += item.count;
+      }
     });
 
     const latestApps = await Application.find({ job: { $in: jobIds } })
@@ -4955,7 +4972,16 @@ exports.getSentOffers = async (req, res) => {
       .sort({ createDate: -1 })
       .lean();
 
-    res.json(offers);
+    const nonOfferStages = ['Applied', 'Reviewed', 'Shortlisted', 'Interview'];
+    const validOffers = offers.filter((o) => {
+      const app = o.application;
+      if (!app) return false;
+      if (nonOfferStages.includes(app.status)) return false;
+      if (app.selectionDetails?.offerStatus === 'Selected') return false;
+      return true;
+    });
+
+    res.json(validOffers);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
