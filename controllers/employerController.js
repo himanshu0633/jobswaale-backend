@@ -246,6 +246,7 @@ exports.getPublicEmployerDetail = async (req, res) => {
       jobs: jobs.map((job) => {
         const status = getJobDisplayStatus(job);
         const jobIdStr = job._id ? job._id.toString() : '';
+        const appStatus = candidateApplicationsMap[jobIdStr] || null;
         const isExpired = Boolean(
           (job.jobExpiry && new Date(job.jobExpiry) < now) ||
           (job.planValidity && new Date(job.planValidity) < now)
