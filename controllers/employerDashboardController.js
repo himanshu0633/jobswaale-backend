@@ -1448,9 +1448,12 @@ exports.getEmployerApplicationDetails = async (req, res) => {
       return res.status(404).json({ message: 'Application not found.' });
     }
 
-    const showContacts = await getEmployerShowContactDetails(req.user._id);
-    const allowDownload = await getEmployerAllowResumeDownload(req.user._id);
     const candidate = application.candidate;
+    const [showContacts, allowDownload, talentPoolItem] = await Promise.all([
+      getEmployerShowContactDetails(req.user._id),
+      getEmployerAllowResumeDownload(req.user._id),
+      TalentPool.findOne({ employerId: req.user._id, candidateId: candidate._id, isDeleted: { $ne: true } }).lean()
+    ]);
     const job = application.job;
     const appliedDate = application.appliedDate || application.createDate || new Date();
     const salaryRange = parseSalaryRange(candidate.expectedSalary || job.salary || '');
@@ -1518,7 +1521,12 @@ exports.getEmployerApplicationDetails = async (req, res) => {
         experience: job.experience || '',
         salary: job.salary || (job.minSalary && job.maxSalary ? `₹${job.minSalary} - ${job.maxSalary}` : 'Not specified'),
         location: [job.city, job.state].filter(Boolean).join(', ') || 'N/A'
-      }
+      },
+      talentPool: talentPoolItem ? {
+        id: talentPoolItem._id,
+        category: talentPoolItem.category,
+        note: talentPoolItem.note
+      } : null
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
