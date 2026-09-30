@@ -3,8 +3,9 @@ const SystemSetting = require('../models/SystemSetting');
 const defaultSettings = {
   siteName: 'JobsWaale',
   siteUrl: 'https://jobswaale.com',
-  siteEmail: 'support@jobswaale.com',
-  sitePhone: '+91 8628821441',
+  siteEmail: 'Jobswaale.india@gmail.com',
+  sitePhone: '+91 99998 84424',
+  siteAddress: 'Hamirpur, Himachal Pradesh, India',
   defaultLang: 'en',
   timezone: 'Asia/Kolkata',
   currency: 'INR',
@@ -35,7 +36,7 @@ const defaultSettings = {
 
   // Home Dashboard
   heroTitle: 'Find Your Dream Job & Build Your Future',
-  heroSubtitle: 'Connect with thousands of employers and find the right job for your career growth.',
+  heroSubtitle: 'Find the jobs faster and easier. We connect job seekers with nearby opportunities and help employers hire quickly.',
   showHeroSearch: true,
   showTrendingSearches: true,
   showAccountTypeCards: true,
@@ -49,7 +50,15 @@ const defaultSettings = {
   statJobseekers: '15,000+',
   statCities: '50+',
   maxFeaturedJobs: 6,
-  maxPopularCategories: 8
+  maxPopularCategories: 8,
+  trustedCompanies: [
+    { name: 'Google', logo: 'https://upload.wikimedia.org/wikipedia/commons/2/2f/Google_2015_logo.svg' },
+    { name: 'Airbnb', logo: 'https://upload.wikimedia.org/wikipedia/commons/6/69/Airbnb_Logo_B%C3%A9lo.svg' },
+    { name: 'Dropbox', logo: 'https://upload.wikimedia.org/wikipedia/commons/7/78/Dropbox_Icon.svg' },
+    { name: 'FedEx', logo: 'https://upload.wikimedia.org/wikipedia/commons/9/9d/FedEx_Express.svg' },
+    { name: 'Walmart', logo: 'https://upload.wikimedia.org/wikipedia/commons/5/5b/Walmart_logo_%282025%29.svg' },
+    { name: 'HubSpot', logo: 'https://upload.wikimedia.org/wikipedia/commons/3/3f/HubSpot_Logo.svg' }
+  ]
 };
 
 const booleanKeys = [
@@ -92,6 +101,17 @@ const normalizeSettings = (input = {}) => {
   merged.maxLoginAttempts = Math.min(Math.max(merged.maxLoginAttempts, 1), 10);
   merged.lockoutDuration = Math.min(Math.max(merged.lockoutDuration, 1), 1440);
   merged.mailPort = Math.min(Math.max(merged.mailPort, 1), 65535);
+
+  if (Array.isArray(merged.trustedCompanies)) {
+    merged.trustedCompanies = merged.trustedCompanies
+      .filter((c) => c && (c.name || c.logo || c.logoUrl))
+      .map((c) => ({
+        name: String(c.name || '').trim(),
+        logo: String(c.logo || c.logoUrl || '').trim()
+      }));
+  } else {
+    merged.trustedCompanies = defaultSettings.trustedCompanies;
+  }
 
   return merged;
 };
@@ -142,7 +162,9 @@ const getPublicSettings = (settings) => {
     statJobseekers: safe.statJobseekers,
     statCities: safe.statCities,
     maxFeaturedJobs: safe.maxFeaturedJobs,
-    maxPopularCategories: safe.maxPopularCategories
+    maxPopularCategories: safe.maxPopularCategories,
+    siteAddress: safe.siteAddress,
+    trustedCompanies: safe.trustedCompanies
   };
 };
 

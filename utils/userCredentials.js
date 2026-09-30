@@ -5,19 +5,24 @@ const Jobseeker = require('../models/Jobseeker');
 const getMobileDigits = (phone = '') => String(phone).replace(/\D/g, '');
 
 const normalizeMobile = (phone = '') => {
-  const digits = getMobileDigits(phone);
-  return digits.length > 10 ? digits.slice(-10) : digits;
+  let digits = getMobileDigits(phone);
+  if (digits.length === 12 && digits.startsWith('91')) {
+    digits = digits.slice(2);
+  } else if (digits.length === 11 && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+  return digits;
 };
 
 const validateMobileNumber = (phone = '') => {
-  const digits = getMobileDigits(phone);
-  if (digits.length < 10) {
-    throw new Error('Mobile number must contain at least 10 digits');
+  const digits = normalizeMobile(phone);
+  if (!digits) {
+    throw new Error('Mobile number is required');
   }
-  if (digits.length > 15) {
-    throw new Error('Mobile number cannot contain more than 15 digits including country code');
+  if (!/^[6-9]\d{9}$/.test(digits)) {
+    throw new Error('Please enter a valid 10-digit mobile number starting with 6, 7, 8, or 9.');
   }
-  return normalizeMobile(phone);
+  return digits;
 };
 
 const getNamePrefix = (name = '') => String(name).replace(/[^a-zA-Z]/g, '').slice(0, 4).toLowerCase();
