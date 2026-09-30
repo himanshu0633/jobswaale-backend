@@ -58,6 +58,53 @@ const defaultSettings = {
     { name: 'FedEx', logo: 'https://upload.wikimedia.org/wikipedia/commons/9/9d/FedEx_Express.svg' },
     { name: 'Walmart', logo: 'https://upload.wikimedia.org/wikipedia/commons/5/5b/Walmart_logo_%282025%29.svg' },
     { name: 'HubSpot', logo: 'https://upload.wikimedia.org/wikipedia/commons/3/3f/HubSpot_Logo.svg' }
+  ],
+  showMeetOurTeam: true,
+  showHappyCustomers: true,
+  teamMembers: [
+    {
+      name: 'Elon Musk',
+      role: 'Marketing Crew',
+      photo: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=400&q=80'
+    },
+    {
+      name: 'Bernard Arnault',
+      role: 'Marketing Crew',
+      photo: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80'
+    },
+    {
+      name: 'Jeff Bezos',
+      role: 'Marketing Crew',
+      photo: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=400&q=80'
+    },
+    {
+      name: 'Bill Gates',
+      role: 'Marketing Crew',
+      photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80'
+    }
+  ],
+  happyCustomers: [
+    {
+      name: 'Sarah Harding',
+      role: 'Visual Designer',
+      photo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+      rating: 5,
+      review: 'We are on the hunt for a designer who is exceptional in both making incredible product interfaces as well as'
+    },
+    {
+      name: 'Sarah Harding',
+      role: 'Visual Designer',
+      photo: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=200&q=80',
+      rating: 5,
+      review: 'We are on the hunt for a designer who is exceptional in both making incredible product interfaces as well as'
+    },
+    {
+      name: 'Sarah Harding',
+      role: 'Visual Designer',
+      photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
+      rating: 5,
+      review: 'We are on the hunt for a designer who is exceptional in both making incredible product interfaces as well as'
+    }
   ]
 };
 
@@ -80,7 +127,9 @@ const booleanKeys = [
   'showPopularCategories',
   'showFeaturedJobs',
   'showTopCompanies',
-  'showDoubleCTA'
+  'showDoubleCTA',
+  'showMeetOurTeam',
+  'showHappyCustomers'
 ];
 
 const numberKeys = ['mailPort', 'minPassLen', 'passExpiry', 'maxLoginAttempts', 'lockoutDuration', 'maxFeaturedJobs', 'maxPopularCategories'];
@@ -111,6 +160,32 @@ const normalizeSettings = (input = {}) => {
       }));
   } else {
     merged.trustedCompanies = defaultSettings.trustedCompanies;
+  }
+
+  if (Array.isArray(merged.teamMembers)) {
+    merged.teamMembers = merged.teamMembers
+      .filter((m) => m && (m.name || m.photo || m.role))
+      .map((m) => ({
+        name: String(m.name || '').trim(),
+        role: String(m.role || '').trim(),
+        photo: String(m.photo || '').trim()
+      }));
+  } else {
+    merged.teamMembers = defaultSettings.teamMembers;
+  }
+
+  if (Array.isArray(merged.happyCustomers)) {
+    merged.happyCustomers = merged.happyCustomers
+      .filter((c) => c && (c.name || c.review || c.photo))
+      .map((c) => ({
+        name: String(c.name || '').trim(),
+        role: String(c.role || '').trim(),
+        photo: String(c.photo || '').trim(),
+        rating: Math.min(Math.max(Number(c.rating) || 5, 1), 5),
+        review: String(c.review || '').trim()
+      }));
+  } else {
+    merged.happyCustomers = defaultSettings.happyCustomers;
   }
 
   return merged;
@@ -164,7 +239,11 @@ const getPublicSettings = (settings) => {
     maxFeaturedJobs: safe.maxFeaturedJobs,
     maxPopularCategories: safe.maxPopularCategories,
     siteAddress: safe.siteAddress,
-    trustedCompanies: safe.trustedCompanies
+    trustedCompanies: safe.trustedCompanies,
+    showMeetOurTeam: safe.showMeetOurTeam,
+    showHappyCustomers: safe.showHappyCustomers,
+    teamMembers: safe.teamMembers,
+    happyCustomers: safe.happyCustomers
   };
 };
 
