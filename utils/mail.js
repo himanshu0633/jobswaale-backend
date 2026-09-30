@@ -258,12 +258,79 @@ const sendCustomMail = async ({ to, subject, html, attachments }) => {
   }
 };
 
+const buildPasswordResetEmail = ({ firstName, resetUrl }) => {
+  const displayName = firstName || 'User';
+  return `
+    <!doctype html>
+    <html>
+      <head><meta charset="utf-8"><title>Reset Your JobsWaale Password</title></head>
+      <body style="margin:0;background:#f5f6f8;font-family:Arial,Helvetica,sans-serif;color:#313a46;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f6f8;padding:28px 0;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;width:94%;background:#ffffff;border:1px solid #e7e9eb;border-radius:10px;overflow:hidden;">
+                <tr>
+                  <td style="background:#4f46e5;padding:24px 28px;color:#ffffff;">
+                    <h1 style="margin:0;font-size:22px;line-height:1.3;">JobsWaale Password Reset</h1>
+                    <p style="margin:8px 0 0;color:#e0e7ff;font-size:14px;">Follow the instructions below to reset your password.</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:28px;">
+                    <p style="margin:0 0 16px;font-size:15px;">Hi ${escapeHtml(displayName)},</p>
+                    <p style="margin:0 0 18px;font-size:15px;line-height:1.6;">We received a request to reset the password for your JobsWaale account. Click the button below to create a new password:</p>
+                    <div style="margin:24px 0;text-align:center;">
+                      <a href="${escapeHtml(resetUrl)}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:700;font-size:15px;">Reset Password</a>
+                    </div>
+                    <p style="margin:0 0 12px;font-size:13px;color:#64748b;line-height:1.5;">This password reset link is valid for <strong>1 hour</strong>. If you did not request a password reset, you can safely ignore this email — your password will remain unchanged.</p>
+                    <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;" />
+                    <p style="margin:0;font-size:12px;color:#94a3b8;word-break:break-all;">
+                      If the button doesn't work, copy and paste this link into your browser:<br />
+                      <a href="${escapeHtml(resetUrl)}" style="color:#4f46e5;">${escapeHtml(resetUrl)}</a>
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:16px 28px;background:#f8fafc;color:#94a3b8;font-size:12px;text-align:center;">
+                    JobsWaale by Duke Infosys
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
+};
+
+const sendPasswordResetEmail = async ({ to, firstName, resetUrl }) => {
+  try {
+    const settings = await getSettings();
+    const transporter = createTransportFromSettings(settings);
+
+    await sendMailWithRetry(transporter, {
+      from: getMailFrom(settings),
+      to,
+      subject: 'Reset your JobsWaale password',
+      html: buildPasswordResetEmail({ firstName, resetUrl })
+    });
+
+    return { sent: true };
+  } catch (error) {
+    console.log(`Password reset mail skipped/failed. ${error.message}. Recipient: ${to}`);
+    return { sent: false, reason: formatMailError(error) };
+  }
+};
+
 module.exports = {
   buildUserWelcomeEmail,
+  buildPasswordResetEmail,
   createTransportFromSettings,
   formatMailError,
   sendMailWithRetry,
   sendUserWelcomeEmail,
+  sendPasswordResetEmail,
   sendAdminNotification,
   sendJobAlertEmail,
   sendCustomMail

@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const { register, login, googleLogin, seedAdmin, createAdmin, forgotPassword } = require('../controllers/authController');
+const {
+  register,
+  login,
+  googleLogin,
+  seedAdmin,
+  createAdmin,
+  forgotPassword,
+  verifyResetToken,
+  resetPassword
+} = require('../controllers/authController');
 const { protect, authorize, authorizeAdminPortal } = require('../middleware/auth');
 
 router.post('/register', register);
@@ -13,6 +22,8 @@ router.post('/superadmin-login', (req, res, next) => {
 router.post('/seed-admin', seedAdmin);
 router.post('/create-admin', protect, authorize('Admin'), createAdmin);
 router.post('/forgot-password', forgotPassword);
+router.get('/verify-reset-token', verifyResetToken);
+router.post('/reset-password', resetPassword);
 
 router.get('/verify-admin', protect, authorizeAdminPortal, (req, res) => {
   res.json({

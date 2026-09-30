@@ -18,7 +18,7 @@ const defaultSettings = {
   notifPayment: true,
   notifReport: false,
   minPassLen: 8,
-  passExpiry: 90,
+  passExpiry: 0,
   maxLoginAttempts: 5,
   lockoutDuration: 30,
   twoFactor: false,

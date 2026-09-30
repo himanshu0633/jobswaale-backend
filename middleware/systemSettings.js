@@ -33,10 +33,14 @@ const maintenanceGuard = async (req, res, next) => {
       '/api/auth/verify-admin',
       '/api/auth/seed-admin',
       '/api/auth/forgot-password',
+      '/api/auth/reset-password',
+      '/api/auth/verify-reset-token',
       '/auth/superadmin-login',
       '/auth/verify-admin',
       '/auth/seed-admin',
-      '/auth/forgot-password'
+      '/auth/forgot-password',
+      '/auth/reset-password',
+      '/auth/verify-reset-token'
     ];
 
     if (adminAuthPaths.includes(req.path)) {
