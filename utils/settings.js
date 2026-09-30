@@ -31,7 +31,25 @@ const defaultSettings = {
   mailUsername: '',
   mailPassword: '',
   mailFromName: 'JobsWaale',
-  mailFromEmail: 'noreply@jobswaale.com'
+  mailFromEmail: 'noreply@jobswaale.com',
+
+  // Home Dashboard
+  heroTitle: 'Find Your Dream Job & Build Your Future',
+  heroSubtitle: 'Connect with thousands of employers and find the right job for your career growth.',
+  showHeroSearch: true,
+  showTrendingSearches: true,
+  showAccountTypeCards: true,
+  showStatsBar: true,
+  showPopularCategories: true,
+  showFeaturedJobs: true,
+  showTopCompanies: true,
+  showDoubleCTA: true,
+  statOpenJobs: '2,000+',
+  statCompanies: '500+',
+  statJobseekers: '15,000+',
+  statCities: '50+',
+  maxFeaturedJobs: 6,
+  maxPopularCategories: 8
 };
 
 const booleanKeys = [
@@ -45,10 +63,18 @@ const booleanKeys = [
   'notifReport',
   'twoFactor',
   'captchaEnabled',
-  'sessionTimeout'
+  'sessionTimeout',
+  'showHeroSearch',
+  'showTrendingSearches',
+  'showAccountTypeCards',
+  'showStatsBar',
+  'showPopularCategories',
+  'showFeaturedJobs',
+  'showTopCompanies',
+  'showDoubleCTA'
 ];
 
-const numberKeys = ['mailPort', 'minPassLen', 'passExpiry', 'maxLoginAttempts', 'lockoutDuration'];
+const numberKeys = ['mailPort', 'minPassLen', 'passExpiry', 'maxLoginAttempts', 'lockoutDuration', 'maxFeaturedJobs', 'maxPopularCategories'];
 
 const normalizeSettings = (input = {}) => {
   const merged = { ...defaultSettings, ...(input || {}) };
@@ -100,7 +126,23 @@ const getPublicSettings = (settings) => {
     userRegistration: safe.userRegistration,
     jobApprovalRequired: safe.jobApprovalRequired,
     minPassLen: safe.minPassLen,
-    captchaEnabled: safe.captchaEnabled
+    captchaEnabled: safe.captchaEnabled,
+    heroTitle: safe.heroTitle,
+    heroSubtitle: safe.heroSubtitle,
+    showHeroSearch: safe.showHeroSearch,
+    showTrendingSearches: safe.showTrendingSearches,
+    showAccountTypeCards: safe.showAccountTypeCards,
+    showStatsBar: safe.showStatsBar,
+    showPopularCategories: safe.showPopularCategories,
+    showFeaturedJobs: safe.showFeaturedJobs,
+    showTopCompanies: safe.showTopCompanies,
+    showDoubleCTA: safe.showDoubleCTA,
+    statOpenJobs: safe.statOpenJobs,
+    statCompanies: safe.statCompanies,
+    statJobseekers: safe.statJobseekers,
+    statCities: safe.statCities,
+    maxFeaturedJobs: safe.maxFeaturedJobs,
+    maxPopularCategories: safe.maxPopularCategories
   };
 };
 
