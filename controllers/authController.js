@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 const { allPermissions } = require('../utils/permissions');
 const { getSettings } = require('../utils/settings');
-const { sendAdminNotification } = require('../utils/mail');
+const { sendAdminNotification, sendPasswordResetEmail } = require('../utils/mail');
 const { isSuperAdminAccount } = require('../middleware/auth');
 const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
 const {
@@ -309,14 +309,6 @@ exports.login = async (req, res) => {
       return res.status(403).json({ message: 'Only super admin can access the admin portal' });
     }
 
-    if (settings.passExpiry > 0 && user.passwordChangedAt) {
-      const ageMs = Date.now() - new Date(user.passwordChangedAt).getTime();
-      const expiryMs = settings.passExpiry * 24 * 60 * 60 * 1000;
-      if (ageMs > expiryMs) {
-        return res.status(403).json({ message: 'Your password has expired. Please contact admin to reset it.' });
-      }
-    }
-
     user.lastLogin = new Date();
     user.failedLoginAttempts = 0;
     user.lockUntil = null;
@@ -578,18 +570,156 @@ exports.createAdmin = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ message: 'Please provide email address' });
+    if (!email || !String(email).trim()) {
+      return res.status(400).json({ message: 'Please provide your email address' });
     }
 
-    const user = await User.findOne({ email });
+    const normalized = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: normalized, isDeleted: false });
     if (!user) {
       return res.status(404).json({ message: 'Oops! Email is not in our database. Please try again.' });
     }
 
-    res.json({ message: 'Reset password link sent successfully! Check your email.' });
+    // Generate secure random reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+    // Save token and 1-hour expiration
+    user.resetPasswordToken = hashedToken;
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await user.save({ validateBeforeSave: false });
+
+    // Derive frontend reset URL based on requester origin or env
+    let baseUrl = process.env.FRONTEND_URL || 'https://jobswaale.vercel.app';
+    if (req.headers.origin) {
+      baseUrl = req.headers.origin;
+    } else if (req.headers.referer) {
+      try {
+        baseUrl = new URL(req.headers.referer).origin;
+      } catch {}
+    }
+    const resetUrl = `${baseUrl.replace(/\/$/, '')}/reset-password?token=${resetToken}`;
+
+    console.log(`[AUTH] Password reset requested for ${normalized}. Reset URL: ${resetUrl}`);
+
+    const mailResult = await sendPasswordResetEmail({
+      to: user.email,
+      firstName: user.firstName,
+      resetUrl
+    });
+
+    if (mailResult && mailResult.sent) {
+      return res.json({
+        success: true,
+        message: 'Reset password link sent successfully! Check your email.'
+      });
+    }
+
+    // Fallback: If mail delivery skipped or SMTP not configured
+    console.warn(`[AUTH] Password reset email not sent (${mailResult?.reason || 'unconfigured'}). Providing recovery link.`);
+    return res.json({
+      success: true,
+      delivered: false,
+      message: 'Password reset link generated. Check your email, or use the direct reset link below if email delivery is not configured on this server.',
+      resetUrl
+    });
   } catch (error) {
     console.error('Forgot Password Error:', error);
+    if (error.message && error.name !== 'TypeError' && error.name !== 'ReferenceError') {
+      return res.status(400).json({ message: error.message });
+    }
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// @desc    Verify Reset Password Token
+// @route   GET /api/auth/verify-reset-token
+// @access  Public
+exports.verifyResetToken = async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) {
+      return res.status(400).json({ valid: false, message: 'Reset token is required' });
+    }
+
+    const hashedToken = crypto.createHash('sha256').update(String(token)).digest('hex');
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: { $gt: Date.now() },
+      isDeleted: false
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        valid: false,
+        message: 'Password reset link is invalid or has expired. Please request a new one.'
+      });
+    }
+
+    return res.json({
+      valid: true,
+      email: user.email,
+      firstName: user.firstName,
+      accountType: user.accountType,
+      role: user.role
+    });
+  } catch (error) {
+    console.error('Verify Reset Token Error:', error);
+    res.status(500).json({ valid: false, message: 'Server error' });
+  }
+};
+
+// @desc    Reset Password
+// @route   POST /api/auth/reset-password
+// @access  Public
+exports.resetPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token) {
+      return res.status(400).json({ message: 'Reset token is missing or invalid' });
+    }
+    if (!password) {
+      return res.status(400).json({ message: 'Please provide a new password' });
+    }
+
+    const settings = await getSettings();
+    const minPassLen = settings.minPassLen || 8;
+    if (String(password).length < minPassLen) {
+      return res.status(400).json({ message: `Password must be at least ${minPassLen} characters long` });
+    }
+
+    const hashedToken = crypto.createHash('sha256').update(String(token)).digest('hex');
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpires: { $gt: Date.now() },
+      isDeleted: false
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        message: 'Password reset link is invalid or has expired. Please request a new one.'
+      });
+    }
+
+    // Set new password - User Schema pre('save') hashes it
+    user.password = password;
+    user.resetPasswordToken = null;
+    user.resetPasswordExpires = null;
+    user.passwordChangedAt = new Date();
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
+    await user.save();
+
+    console.log(`[AUTH] Password reset successfully for ${user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Password has been reset successfully! You can now sign in with your new password.',
+      accountType: user.accountType,
+      role: user.role
+    });
+  } catch (error) {
+    console.error('Reset Password Error:', error);
     if (error.message && error.name !== 'TypeError' && error.name !== 'ReferenceError') {
       return res.status(400).json({ message: error.message });
     }

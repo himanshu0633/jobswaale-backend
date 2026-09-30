@@ -129,6 +129,14 @@ const UserSchema = new mongoose.Schema({
   isDeleted: {
     type: Boolean,
     default: false
+  },
+  resetPasswordToken: {
+    type: String,
+    default: null
+  },
+  resetPasswordExpires: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
@@ -138,6 +146,7 @@ const UserSchema = new mongoose.Schema({
 UserSchema.index({ role: 1 });
 UserSchema.index({ accountType: 1 });
 UserSchema.index({ isDeleted: 1 });
+UserSchema.index({ resetPasswordToken: 1 }, { sparse: true });
 UserSchema.index({ 'providers.googleId': 1 }, { sparse: true });
 
 // Hash password before saving
