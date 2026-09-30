@@ -57,3 +57,17 @@ exports.sendTestEmail = async (req, res) => {
     res.status(400).json({ message: formatMailError(error) });
   }
 };
+
+exports.uploadImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No image file uploaded' });
+    }
+    const publicOrigin = `${req.protocol}://${req.get('host')}`;
+    const imageUrl = `${publicOrigin.replace(/\/+$/, '')}/uploads/site/${req.file.filename}`;
+    res.json({ message: 'Image uploaded successfully', imageUrl });
+  } catch (error) {
+    console.error('Settings image upload error:', error);
+    res.status(500).json({ message: error.message || 'Image upload failed' });
+  }
+};

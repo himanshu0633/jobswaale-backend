@@ -148,13 +148,13 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
 
-    let normalizedPhone = String(phone || '').trim();
-    if (normalizedPhone) {
-      normalizedPhone = validateMobileNumber(normalizedPhone);
-      const phoneExists = await findDuplicateMobile(normalizedPhone);
-      if (phoneExists) {
-        return res.status(400).json({ message: 'Mobile number already exists' });
-      }
+    if (!phone || !String(phone).trim()) {
+      return res.status(400).json({ message: 'Please provide a valid 10-digit mobile number' });
+    }
+    const normalizedPhone = validateMobileNumber(phone);
+    const phoneExists = await findDuplicateMobile(normalizedPhone);
+    if (phoneExists) {
+      return res.status(400).json({ message: 'Mobile number already exists' });
     }
 
     const nameParts = String(fullName || '').trim().split(/\s+/).filter(Boolean);

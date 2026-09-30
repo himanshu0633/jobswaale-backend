@@ -626,13 +626,35 @@ exports.updateJobseekerProfile = async (req, res) => {
     if (expectedSalary !== undefined) seeker.expectedSalary = expectedSalary;
     if (preferredLocation !== undefined) seeker.preferredLocation = preferredLocation;
     if (bio !== undefined) seeker.bio = bio;
-    if (skills !== undefined) seeker.skills = Array.isArray(skills) ? skills : [];
+    if (skills !== undefined) {
+      if (Array.isArray(skills)) {
+        const invalidSkill = skills.find(s => /^\d+$/.test(String(s).trim()) || !/^[a-zA-Z0-9+#.\s/-]{2,40}$/.test(String(s).trim()));
+        if (invalidSkill) {
+          return res.status(400).json({ message: `Invalid skill: "${invalidSkill}". Skills must contain valid words or technologies (not solely numbers).` });
+        }
+        seeker.skills = skills.map(s => String(s).trim()).filter(Boolean);
+      } else {
+        seeker.skills = [];
+      }
+    }
     if (linkedin !== undefined) seeker.linkedin = linkedin;
     if (portfolio !== undefined) seeker.portfolio = portfolio;
     if (github !== undefined) seeker.github = github;
     if (passingYear !== undefined) seeker.passingYear = passingYear;
-    if (studyField !== undefined) seeker.studyField = studyField;
-    if (university !== undefined) seeker.university = university;
+    if (studyField !== undefined) {
+      const fieldStr = String(studyField || '').trim();
+      if (fieldStr && (fieldStr.length < 2 || !/[a-zA-Z]/.test(fieldStr))) {
+        return res.status(400).json({ message: 'Field of Study must contain at least 2 letters (e.g. Computer Science).' });
+      }
+      seeker.studyField = fieldStr;
+    }
+    if (university !== undefined) {
+      const univStr = String(university || '').trim();
+      if (univStr && (univStr.length < 2 || !/[a-zA-Z]/.test(univStr))) {
+        return res.status(400).json({ message: 'College / University name must contain at least 2 letters.' });
+      }
+      seeker.university = univStr;
+    }
     if (jobSearchStatus !== undefined && ['looking', 'not-looking'].includes(jobSearchStatus)) seeker.jobSearchStatus = jobSearchStatus;
 
     // Handle Mongoose ObjectID references
