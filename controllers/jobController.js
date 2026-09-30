@@ -250,6 +250,30 @@ exports.createJob = async (req, res) => {
       return res.status(400).json({ message: 'jobTitle, jobCategory, jobType, vacancies, description, experience, companyName, email, and phone are required' });
     }
 
+    if (minSalary !== undefined && minSalary !== null && minSalary !== '') {
+      const minNum = Number(minSalary);
+      if (isNaN(minNum) || minNum <= 0) {
+        return res.status(400).json({ message: 'Minimum salary must be greater than 0' });
+      }
+    }
+    if (maxSalary !== undefined && maxSalary !== null && maxSalary !== '') {
+      const maxNum = Number(maxSalary);
+      const minNum = Number(minSalary);
+      if (isNaN(maxNum) || maxNum <= 0) {
+        return res.status(400).json({ message: 'Maximum salary must be greater than 0' });
+      }
+      if (!isNaN(minNum) && minNum > 0 && maxNum <= minNum) {
+        return res.status(400).json({ message: 'Maximum salary must be greater than minimum salary' });
+      }
+    }
+
+    if (Array.isArray(skills) && skills.length > 0) {
+      const invalidSkills = skills.filter(s => !/^[a-zA-Z0-9+#.\- ]{2,50}$/.test(String(s).trim()) || /^\d+$/.test(String(s).trim()));
+      if (invalidSkills.length > 0) {
+        return res.status(400).json({ message: `Invalid skill name(s): "${invalidSkills.join(', ')}". Skills must contain valid words or technologies.` });
+      }
+    }
+
     const job = new Job({
       jobTitle,
       jobCategory,
@@ -384,6 +408,32 @@ exports.updateJob = async (req, res) => {
     const job = await Job.findById(id);
     if (!job) {
       return res.status(404).json({ message: 'Job posting not found' });
+    }
+
+    const effectiveMin = minSalary !== undefined && minSalary !== null && minSalary !== '' ? Number(minSalary) : job.minSalary;
+    const effectiveMax = maxSalary !== undefined && maxSalary !== null && maxSalary !== '' ? Number(maxSalary) : job.maxSalary;
+
+    if (minSalary !== undefined && minSalary !== null && minSalary !== '') {
+      if (isNaN(effectiveMin) || effectiveMin <= 0) {
+        return res.status(400).json({ message: 'Minimum salary must be greater than 0' });
+      }
+    }
+    if (maxSalary !== undefined && maxSalary !== null && maxSalary !== '') {
+      if (isNaN(effectiveMax) || effectiveMax <= 0) {
+        return res.status(400).json({ message: 'Maximum salary must be greater than 0' });
+      }
+    }
+    if (effectiveMin !== undefined && effectiveMin !== null && effectiveMax !== undefined && effectiveMax !== null) {
+      if (effectiveMin > 0 && effectiveMax <= effectiveMin) {
+        return res.status(400).json({ message: 'Maximum salary must be greater than minimum salary' });
+      }
+    }
+
+    if (Array.isArray(skills) && skills.length > 0) {
+      const invalidSkills = skills.filter(s => !/^[a-zA-Z0-9+#.\- ]{2,50}$/.test(String(s).trim()) || /^\d+$/.test(String(s).trim()));
+      if (invalidSkills.length > 0) {
+        return res.status(400).json({ message: `Invalid skill name(s): "${invalidSkills.join(', ')}". Skills must contain valid words or technologies.` });
+      }
     }
 
     const updated = await Job.findByIdAndUpdate(
