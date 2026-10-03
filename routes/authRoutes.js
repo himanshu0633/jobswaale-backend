@@ -11,8 +11,9 @@ const {
   resetPassword
 } = require('../controllers/authController');
 const { protect, authorize, authorizeAdminPortal } = require('../middleware/auth');
+const { uploadResumeFile } = require('../middleware/resumeUpload');
 
-router.post('/register', register);
+router.post('/register', uploadResumeFile, register);
 router.post('/login', login);
 router.post('/google', googleLogin);
 router.post('/superadmin-login', (req, res, next) => {
