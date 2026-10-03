@@ -117,6 +117,14 @@ const JobseekerSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  resumeName: {
+    type: String,
+    default: ''
+  },
+  resumeVersion: {
+    type: Number,
+    default: 0
+  },
   status: {
     type: String,
     enum: ['active', 'pending', 'blacklist'],

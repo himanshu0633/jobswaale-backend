@@ -1241,11 +1241,28 @@ exports.uploadJobseekerResume = async (req, res) => {
     const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
 
     seeker.resume = `${publicOrigin.replace(/\/+$/, '')}/uploads/resumes/${req.file.filename}`;
+    
+    // Generate standardized candidate resume name: mohit_parmar_resume, mohit_parmar_resume_2, etc.
+    const candidateName = seeker.name || (req.user ? `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() : '') || 'candidate';
+    const nameSlug = candidateName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'candidate';
+    const ext = path.extname(req.file.originalname || '') || '.pdf';
+    seeker.resumeVersion = (seeker.resumeVersion || 0) + 1;
+    const resumeDisplayName = seeker.resumeVersion === 1 ? `${nameSlug}_resume${ext}` : `${nameSlug}_resume_${seeker.resumeVersion}${ext}`;
+    seeker.resumeName = resumeDisplayName;
+
     await seeker.save();
+
+    await User.findByIdAndUpdate(userId, {
+      resume: seeker.resume,
+      resumeName: seeker.resumeName,
+      resumeVersion: seeker.resumeVersion
+    });
 
     res.json({
       message: 'Resume uploaded successfully',
-      resume: seeker.resume
+      resume: seeker.resume,
+      resumeName: seeker.resumeName,
+      resumeVersion: seeker.resumeVersion
     });
   } catch (error) {
     console.error('Upload Resume Error:', error);
@@ -1281,7 +1298,13 @@ exports.deleteJobseekerResume = async (req, res) => {
     }
 
     seeker.resume = '';
+    seeker.resumeName = '';
     await seeker.save();
+
+    await User.findByIdAndUpdate(userId, {
+      resume: '',
+      resumeName: ''
+    });
 
     res.json({ message: 'Resume deleted successfully' });
   } catch (error) {

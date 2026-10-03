@@ -165,8 +165,11 @@ exports.register = async (req, res) => {
     const selectedPlanName = defaultPlan?.planName || '';
 
     let resumeUrl = '';
+    let resumeDisplayName = '';
+    let resumeVersion = 0;
     if (req.file) {
       const fs = require('fs');
+      const path = require('path');
       const Attachment = require('../models/Attachment');
       try {
         if (fs.existsSync(req.file.path)) {
@@ -191,8 +194,16 @@ exports.register = async (req, res) => {
       const protocol = forwardedProto || req.protocol || 'https';
       const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
       resumeUrl = `${publicOrigin.replace(/\/+$/, '')}/uploads/resumes/${req.file.filename}`;
+      const ext = path.extname(req.file.originalname || '') || '.pdf';
+      const nameSlug = `${firstName}_${lastName}`.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'candidate';
+      resumeDisplayName = `${nameSlug}_resume${ext}`;
+      resumeVersion = 1;
     } else if (req.body.resumeUrl) {
       resumeUrl = String(req.body.resumeUrl).trim();
+      const ext = resumeUrl.includes('.') ? `.${resumeUrl.split('.').pop().split(/[?#]/)[0]}` : '.pdf';
+      const nameSlug = `${firstName}_${lastName}`.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'candidate';
+      resumeDisplayName = `${nameSlug}_resume${ext}`;
+      resumeVersion = 1;
     }
 
     const user = await User.create({
@@ -201,6 +212,8 @@ exports.register = async (req, res) => {
       phone: normalizedPhone,
       workStatus: role === 'Jobseeker' ? String(workStatus || '').trim() : '',
       resume: resumeUrl,
+      resumeName: resumeDisplayName,
+      resumeVersion,
       selectedPlan: selectedPlanId,
       updatesConsent: updatesConsent !== false && updatesConsent !== 'false',
       companyName: role === 'Employer' ? String(companyName || '').trim() : '',
@@ -249,6 +262,8 @@ exports.register = async (req, res) => {
             currentPlan: selectedPlanId,
             experience: user.workStatus || '',
             resume: resumeUrl || '',
+            resumeName: resumeDisplayName,
+            resumeVersion,
             status: 'active'
           }
         },
@@ -287,6 +302,8 @@ exports.register = async (req, res) => {
       phone: user.phone,
       workStatus: user.workStatus,
       resume: user.resume || '',
+      resumeName: user.resumeName || '',
+      resumeVersion: user.resumeVersion || 0,
       selectedPlan: user.selectedPlan,
       companyName: user.companyName,
       designation: user.designation,
