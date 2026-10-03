@@ -164,13 +164,45 @@ exports.register = async (req, res) => {
     const selectedPlanId = defaultPlan?._id || null;
     const selectedPlanName = defaultPlan?.planName || '';
 
+    let resumeUrl = '';
+    if (req.file) {
+      const fs = require('fs');
+      const Attachment = require('../models/Attachment');
+      try {
+        if (fs.existsSync(req.file.path)) {
+          const fileData = fs.readFileSync(req.file.path);
+          await Attachment.findOneAndUpdate(
+            { filename: req.file.filename },
+            {
+              filename: req.file.filename,
+              data: fileData,
+              mimeType: req.file.mimetype,
+              size: req.file.size
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
+          fs.unlink(req.file.path, () => {});
+        }
+      } catch (fileErr) {
+        console.error('Error saving resume attachment:', fileErr);
+      }
+
+      const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+      const protocol = forwardedProto || req.protocol || 'https';
+      const publicOrigin = process.env.PUBLIC_BASE_URL || `${protocol}://${req.get('host')}`;
+      resumeUrl = `${publicOrigin.replace(/\/+$/, '')}/uploads/resumes/${req.file.filename}`;
+    } else if (req.body.resumeUrl) {
+      resumeUrl = String(req.body.resumeUrl).trim();
+    }
+
     const user = await User.create({
       firstName,
       lastName,
       phone: normalizedPhone,
       workStatus: role === 'Jobseeker' ? String(workStatus || '').trim() : '',
+      resume: resumeUrl,
       selectedPlan: selectedPlanId,
-      updatesConsent: updatesConsent !== false,
+      updatesConsent: updatesConsent !== false && updatesConsent !== 'false',
       companyName: role === 'Employer' ? String(companyName || '').trim() : '',
       designation: role === 'Employer' ? String(designation || '').trim() : '',
       companyType: role === 'Employer' ? String(companyType || '').trim() : '',
@@ -196,6 +228,34 @@ exports.register = async (req, res) => {
       });
     }
 
+    if (role === 'Jobseeker') {
+      const Jobseeker = require('../models/Jobseeker');
+      await Jobseeker.findOneAndUpdate(
+        { userId: user._id },
+        {
+          $setOnInsert: {
+            userId: user._id,
+            login: user._id,
+            name: `${user.firstName} ${user.lastName}`.trim() || 'Anonymous',
+            phone: user.phone || '',
+            gender: '',
+            city: '',
+            state: '',
+            country: '',
+            district: '',
+            address: '',
+            pinCode: '',
+            qualification: null,
+            currentPlan: selectedPlanId,
+            experience: user.workStatus || '',
+            resume: resumeUrl || '',
+            status: 'active'
+          }
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+    }
+
     await sendAdminNotification({
       enabled: role === 'Employer' ? settings.notifNewEmp : settings.notifNewApp,
       subject: `New ${role} registration`,
@@ -212,6 +272,7 @@ exports.register = async (req, res) => {
           { label: 'Default Plan', value: selectedPlanName || '-' }
         ] : [
           { label: 'Work Status', value: String(workStatus || '').trim() || '-' },
+          ...(resumeUrl ? [{ label: 'CV / Resume', value: resumeUrl }] : []),
           { label: 'Default Plan', value: selectedPlanName || '-' }
         ]),
         { label: 'Role', value: role },
@@ -225,6 +286,7 @@ exports.register = async (req, res) => {
       lastName: user.lastName,
       phone: user.phone,
       workStatus: user.workStatus,
+      resume: user.resume || '',
       selectedPlan: user.selectedPlan,
       companyName: user.companyName,
       designation: user.designation,

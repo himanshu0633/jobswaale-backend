@@ -235,6 +235,7 @@ const ensureJobseekerExists = async (userId) => {
           qualification: null,
           currentPlan: user?.selectedPlan || null,
           experience: user?.workStatus || '',
+          resume: user?.resume || '',
           status: 'active'
         }
       },
