@@ -52,6 +52,15 @@ const UserSchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  resumeName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  resumeVersion: {
+    type: Number,
+    default: 0
+  },
   updatesConsent: {
     type: Boolean,
     default: true
