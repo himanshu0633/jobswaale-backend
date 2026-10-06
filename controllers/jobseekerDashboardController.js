@@ -566,6 +566,8 @@ exports.updateJobseekerProfile = async (req, res) => {
       experience,
       experiences,
       expectedSalary,
+      monthlySalary,
+      annualSalary,
       preferredLocation,
       industryType,
       jobCategory,
@@ -624,7 +626,16 @@ exports.updateJobseekerProfile = async (req, res) => {
       }
       seeker.experiences = result.experiences;
     }
-    if (expectedSalary !== undefined) seeker.expectedSalary = expectedSalary;
+    if (monthlySalary !== undefined) seeker.monthlySalary = Math.max(0, Number(monthlySalary) || 0);
+    if (annualSalary !== undefined) seeker.annualSalary = Math.max(0, Number(annualSalary) || 0);
+    if (expectedSalary !== undefined) {
+      seeker.expectedSalary = expectedSalary;
+    } else if (seeker.monthlySalary > 0 || seeker.annualSalary > 0) {
+      const mVal = seeker.monthlySalary || Math.round(seeker.annualSalary / 12);
+      const aVal = seeker.annualSalary || (seeker.monthlySalary * 12);
+      const lpa = (aVal / 100000).toFixed(1).replace(/\.0$/, '');
+      seeker.expectedSalary = `₹${mVal.toLocaleString('en-IN')} / Month (₹${aVal.toLocaleString('en-IN')} / Year · ${lpa} LPA)`;
+    }
     if (preferredLocation !== undefined) seeker.preferredLocation = preferredLocation;
     if (bio !== undefined) seeker.bio = bio;
     if (skills !== undefined) {

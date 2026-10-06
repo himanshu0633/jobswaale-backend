@@ -77,7 +77,16 @@ const JobseekerSchema = new mongoose.Schema({
     }
   }],
   expectedSalary: {
-    type: String
+    type: String,
+    default: ''
+  },
+  monthlySalary: {
+    type: Number,
+    default: 0
+  },
+  annualSalary: {
+    type: Number,
+    default: 0
   },
   preferredLocation: {
     type: String
