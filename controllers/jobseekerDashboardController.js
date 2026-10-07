@@ -685,7 +685,19 @@ exports.updateJobseekerProfile = async (req, res) => {
     if (jobCategory !== undefined) seeker.jobCategory = mongoose.Types.ObjectId.isValid(jobCategory) ? jobCategory : null;
     if (jobType !== undefined) seeker.jobType = mongoose.Types.ObjectId.isValid(jobType) ? jobType : null;
 
-    await seeker.save();
+    try {
+      await seeker.save();
+    } catch (saveError) {
+      if (saveError?.name === 'VersionError') {
+        console.warn('Jobseeker VersionError encountered, resolving via direct update:', saveError.message);
+        const updateDoc = seeker.toObject();
+        delete updateDoc.__v;
+        delete updateDoc._id;
+        await Jobseeker.findByIdAndUpdate(seeker._id, { $set: updateDoc });
+      } else {
+        throw saveError;
+      }
+    }
 
     const populated = await Jobseeker.findById(seeker._id)
       .populate('userId', 'email firstName lastName phone role accountType status')
@@ -705,10 +717,13 @@ exports.updateJobseekerProfile = async (req, res) => {
     });
   } catch (error) {
     console.error('Update Jobseeker Profile Error:', error);
+    if (error?.name === 'VersionError') {
+      return res.status(409).json({ message: 'Profile was modified concurrently. Please refresh the page and try again.' });
+    }
     if (
       error?.name === 'ValidationError' ||
       error?.name === 'CastError' ||
-      /mobile number|experience/i.test(error?.message || '')
+      (/mobile number|experience/i.test(error?.message || '') && !/version \d+/i.test(error?.message || ''))
     ) {
       return res.status(400).json({ message: error.message });
     }

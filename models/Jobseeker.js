@@ -219,7 +219,8 @@ const JobseekerSchema = new mongoose.Schema({
     default: false
   }
 }, {
-  timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }
+  timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' },
+  versionKey: false
 });
 
 module.exports = mongoose.model('Jobseeker', JobseekerSchema);
