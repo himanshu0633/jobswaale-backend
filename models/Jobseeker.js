@@ -76,6 +76,18 @@ const JobseekerSchema = new mongoose.Schema({
       trim: true
     }
   }],
+  currentSalary: {
+    type: String,
+    default: ''
+  },
+  currentMonthlySalary: {
+    type: Number,
+    default: 0
+  },
+  currentAnnualSalary: {
+    type: Number,
+    default: 0
+  },
   expectedSalary: {
     type: String,
     default: ''

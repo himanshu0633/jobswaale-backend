@@ -586,6 +586,7 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     experience: candidate.experience || 'Fresher',
     experienceValue: getExperienceValue(candidate.experience),
     qualification: candidate.qualification?.name || '',
+    currentSalary: candidate.currentSalary || (candidate.currentAnnualSalary ? `₹${(candidate.currentAnnualSalary / 100000).toFixed(1).replace(/\.0$/, '')} LPA` : (candidate.currentMonthlySalary ? `₹${candidate.currentMonthlySalary.toLocaleString('en-IN')}/mo` : 'Not specified')),
     expectedSalary: candidate.expectedSalary || 'Not specified',
     salaryMin: salary.min,
     salaryMax: salary.max,
@@ -965,7 +966,7 @@ exports.getEmployerCandidateProfile = async (req, res) => {
       designation: candidate.designation || mapped.role,
       bio: candidate.bio || `Experienced ${mapped.role} profile with ${mapped.experience} experience.`,
       expectedSalary: candidate.expectedSalary || 'Not specified',
-      currentSalary: salary.min ? `₹ ${salary.min} LPA` : 'Not specified',
+      currentSalary: candidate.currentSalary || (candidate.currentAnnualSalary ? `₹${(candidate.currentAnnualSalary / 100000).toFixed(1).replace(/\.0$/, '')} LPA` : (candidate.currentMonthlySalary ? `₹${candidate.currentMonthlySalary.toLocaleString('en-IN')}/mo` : (salary.min ? `₹ ${salary.min} LPA` : 'Not specified'))),
       noticePeriod: candidate.status === 'active' ? 'Immediate' : '30 Days',
       relocate: candidate.relocate === 'no' ? 'No' : 'Yes',
       linkedin: candidate.linkedin || '',
@@ -1177,7 +1178,7 @@ exports.getEmployerApplications = async (req, res) => {
       })
       .populate({
         path: 'candidate',
-        select: 'name phone city state preferredLocation experience resume userId',
+        select: 'name phone city state preferredLocation experience resume userId currentSalary currentMonthlySalary currentAnnualSalary expectedSalary monthlySalary annualSalary',
         populate: { path: 'userId', select: 'email' }
       })
       .sort({ appliedDate: -1, createDate: -1, matchScore: -1 })
@@ -1204,6 +1205,8 @@ exports.getEmployerApplications = async (req, res) => {
         jobStatus: job.status || 'inactive',
         jobType: job.jobType?.jobType || 'Full Time',
         experience: candidate.experience || 'Fresher',
+        currentSalary: candidate.currentSalary || (candidate.currentAnnualSalary ? `₹${(candidate.currentAnnualSalary / 100000).toFixed(1).replace(/\.0$/, '')} LPA` : (candidate.currentMonthlySalary ? `₹${candidate.currentMonthlySalary.toLocaleString('en-IN')}/mo` : '')),
+        expectedSalary: candidate.expectedSalary || '',
         appliedDate: new Date(appliedDate).toISOString().slice(0, 10),
         displayDate: formatDisplayDate(appliedDate),
         matchScore: app.matchScore || 0,
@@ -1487,8 +1490,8 @@ exports.getEmployerApplicationDetails = async (req, res) => {
         experience: candidate.experience || 'Fresher',
         qualification: candidate.qualification?.name || 'Not specified',
         industry: candidate.industryType?.industryType || '',
+        currentSalary: candidate.currentSalary || (candidate.currentAnnualSalary ? `₹${(candidate.currentAnnualSalary / 100000).toFixed(1).replace(/\.0$/, '')} LPA` : (candidate.currentMonthlySalary ? `₹${candidate.currentMonthlySalary.toLocaleString('en-IN')}/mo` : (salaryRange.min ? `₹ ${salaryRange.min} LPA` : 'Not specified'))),
         expectedSalary: candidate.expectedSalary || 'Not specified',
-        currentSalary: salaryRange.min ? `₹ ${salaryRange.min} LPA` : 'Not specified',
         noticePeriod: candidate.noticePeriod || 'Immediate',
         relocate: candidate.relocate === 'no' ? 'No' : 'Yes',
         resume: allowDownload ? (candidate.resume || '') : '',

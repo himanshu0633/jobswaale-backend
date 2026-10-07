@@ -565,6 +565,9 @@ exports.updateJobseekerProfile = async (req, res) => {
       relocate,
       experience,
       experiences,
+      currentSalary,
+      currentMonthlySalary,
+      currentAnnualSalary,
       expectedSalary,
       monthlySalary,
       annualSalary,
@@ -625,6 +628,16 @@ exports.updateJobseekerProfile = async (req, res) => {
         return res.status(400).json({ message: result.error });
       }
       seeker.experiences = result.experiences;
+    }
+    if (currentMonthlySalary !== undefined) seeker.currentMonthlySalary = Math.max(0, Number(currentMonthlySalary) || 0);
+    if (currentAnnualSalary !== undefined) seeker.currentAnnualSalary = Math.max(0, Number(currentAnnualSalary) || 0);
+    if (currentSalary !== undefined) {
+      seeker.currentSalary = currentSalary;
+    } else if (seeker.currentMonthlySalary > 0 || seeker.currentAnnualSalary > 0) {
+      const cmVal = seeker.currentMonthlySalary || Math.round(seeker.currentAnnualSalary / 12);
+      const caVal = seeker.currentAnnualSalary || (seeker.currentMonthlySalary * 12);
+      const cLpa = (caVal / 100000).toFixed(1).replace(/\.0$/, '');
+      seeker.currentSalary = `₹${cmVal.toLocaleString('en-IN')} / Month (₹${caVal.toLocaleString('en-IN')} / Year · ${cLpa} LPA)`;
     }
     if (monthlySalary !== undefined) seeker.monthlySalary = Math.max(0, Number(monthlySalary) || 0);
     if (annualSalary !== undefined) seeker.annualSalary = Math.max(0, Number(annualSalary) || 0);
