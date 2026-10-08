@@ -41,8 +41,22 @@ const createImageUpload = (folderName) => {
   });
 
   return (fieldName) => (req, res, next) => {
-    upload.single(fieldName)(req, res, (error) => {
-      if (!error) return next();
+    const uploader = Array.isArray(fieldName)
+      ? upload.fields(fieldName.map(f => ({ name: f, maxCount: 1 })))
+      : upload.single(fieldName || 'image');
+
+    uploader(req, res, (error) => {
+      if (!error) {
+        if (Array.isArray(fieldName) && req.files) {
+          for (const key of fieldName) {
+            if (req.files[key]?.[0]) {
+              req.file = req.files[key][0];
+              break;
+            }
+          }
+        }
+        return next();
+      }
 
       const message = error.code === 'LIMIT_FILE_SIZE'
         ? 'Image cannot exceed 5 MB.'

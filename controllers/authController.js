@@ -13,6 +13,7 @@ const {
   findDuplicateEmail,
   findDuplicateMobile,
   normalizeEmail,
+  validateEmailAddress,
   validateMobileNumber
 } = require('../utils/userCredentials');
 
@@ -142,7 +143,13 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: 'Please provide complete company details' });
     }
 
-    const normalizedEmail = normalizeEmail(email);
+    let normalizedEmail = '';
+    try {
+      normalizedEmail = validateEmailAddress(email);
+    } catch (emailErr) {
+      return res.status(400).json({ message: emailErr.message, suggestion: emailErr.suggestion });
+    }
+
     const userExists = await findDuplicateEmail(normalizedEmail);
     if (userExists) {
       return res.status(400).json({ message: 'User already exists with this email' });
@@ -653,8 +660,14 @@ exports.forgotPassword = async (req, res) => {
       return res.status(400).json({ message: 'Please provide your email address' });
     }
 
-    const normalized = String(email).trim().toLowerCase();
-    const user = await User.findOne({ email: normalized, isDeleted: false });
+    let normalizedEmail = '';
+    try {
+      normalizedEmail = validateEmailAddress(email);
+    } catch (emailErr) {
+      return res.status(400).json({ message: emailErr.message, suggestion: emailErr.suggestion });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail, isDeleted: false });
     if (!user) {
       return res.status(404).json({ message: 'Oops! Email is not in our database. Please try again.' });
     }

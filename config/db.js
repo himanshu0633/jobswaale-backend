@@ -18,6 +18,17 @@ const connectDB = async () => {
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`Error Connecting to MongoDB: ${error.message}`);
+    const localUri = 'mongodb://127.0.0.1:27017/jobswaale';
+    if (mongoUri !== localUri && mongoUri !== 'mongodb://localhost:27017/jobswaale') {
+      console.warn('Attempting fallback to local MongoDB instance...');
+      try {
+        const localConn = await mongoose.connect(localUri);
+        console.log(`Fallback connected to local MongoDB: ${localConn.connection.host}`);
+        return;
+      } catch (localErr) {
+        console.error(`Local MongoDB fallback failed: ${localErr.message}`);
+      }
+    }
     console.error('Check your internet/VPN, MongoDB Atlas network access IP whitelist, and MONGO_URI in .env.');
     throw error;
   }

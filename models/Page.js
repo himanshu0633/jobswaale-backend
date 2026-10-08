@@ -22,6 +22,35 @@ const PageSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  bannerImage: {
+    type: String,
+    default: ''
+  },
+  banners: [
+    {
+      url: {
+        type: String,
+        default: ''
+      },
+      position: {
+        type: String,
+        enum: [
+          'top-left', 'top-center', 'top-right',
+          'center-left', 'center', 'center-right',
+          'bottom-left', 'bottom-center', 'bottom-right'
+        ],
+        default: 'top-center'
+      },
+      title: {
+        type: String,
+        default: ''
+      },
+      alt: {
+        type: String,
+        default: ''
+      }
+    }
+  ],
   sortingOrder: {
     type: Number,
     default: 10
@@ -49,6 +78,10 @@ const PageSchema = new mongoose.Schema({
   projectData: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
+  },
+  sections: {
+    type: Array,
+    default: []
   },
   published: {
     type: Boolean,

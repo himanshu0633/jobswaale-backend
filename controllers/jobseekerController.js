@@ -5,6 +5,7 @@ const {
   findDuplicateEmail,
   findDuplicateMobile,
   normalizeEmail,
+  validateEmailAddress,
   validateMobileNumber
 } = require('../utils/userCredentials');
 const { getSettings } = require('../utils/settings');
@@ -220,7 +221,13 @@ exports.createJobseeker = async (req, res) => {
       return res.status(400).json({ message: 'email, password, name, phone, gender, qualification, and experience are required' });
     }
 
-    const normalizedEmail = normalizeEmail(email);
+    let normalizedEmail = '';
+    try {
+      normalizedEmail = validateEmailAddress(email);
+    } catch (emailErr) {
+      return res.status(400).json({ message: emailErr.message, suggestion: emailErr.suggestion });
+    }
+
     const userExists = await findDuplicateEmail(normalizedEmail);
     if (userExists) {
       return res.status(400).json({ message: 'User with this email already exists' });

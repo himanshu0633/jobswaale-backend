@@ -5,7 +5,9 @@ const { getSettings } = require('../utils/settings');
 const {
   validateMobileNumber,
   generatePasswordFromNameAndPhone,
-  findDuplicateMobile
+  findDuplicateMobile,
+  validateEmailAddress,
+  findDuplicateEmail
 } = require('../utils/userCredentials');
 
 const userResponseFields = '-password';
@@ -65,7 +67,14 @@ exports.createAdminUser = async (req, res) => {
     if (!role) return res.status(400).json({ message: 'Please select a valid active role' });
     const settings = await getSettings();
 
-    const userExists = await User.findOne({ email });
+    let normalizedEmail = '';
+    try {
+      normalizedEmail = validateEmailAddress(email);
+    } catch (emailErr) {
+      return res.status(400).json({ message: emailErr.message, suggestion: emailErr.suggestion });
+    }
+
+    const userExists = await findDuplicateEmail(normalizedEmail);
     if (userExists) return res.status(400).json({ message: 'User with this email already exists' });
 
     const usernameExists = await User.findOne({ username });
@@ -87,7 +96,7 @@ exports.createAdminUser = async (req, res) => {
       firstName,
       lastName,
       username,
-      email,
+      email: normalizedEmail,
       phone: normalizedPhone,
       password: finalPassword,
       role: role.name,

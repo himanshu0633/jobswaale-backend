@@ -2,7 +2,7 @@ const Employer = require('../models/Employer');
 const User = require('../models/User');
 const Job = require('../models/Job');
 const mongoose = require('mongoose');
-const { validateMobileNumber, findDuplicateMobile } = require('../utils/userCredentials');
+const { validateMobileNumber, findDuplicateMobile, validateEmailAddress, findDuplicateEmail } = require('../utils/userCredentials');
 const { getSettings } = require('../utils/settings');
 const { sendAdminNotification } = require('../utils/mail');
 
@@ -372,7 +372,14 @@ exports.createEmployer = async (req, res) => {
       return res.status(400).json({ message: 'Email, password, companyName, phone, and industryType are required' });
     }
 
-    const userExists = await User.findOne({ email });
+    let normalizedEmail = '';
+    try {
+      normalizedEmail = validateEmailAddress(email);
+    } catch (emailErr) {
+      return res.status(400).json({ message: emailErr.message, suggestion: emailErr.suggestion });
+    }
+
+    const userExists = await findDuplicateEmail(normalizedEmail);
     if (userExists) {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
@@ -385,7 +392,7 @@ exports.createEmployer = async (req, res) => {
 
     // Create user credentials
     const user = await User.create({
-      email,
+      email: normalizedEmail,
       phone: normalizedPhone,
       password,
       role: 'Employer',

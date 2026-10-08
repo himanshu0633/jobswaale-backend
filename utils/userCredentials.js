@@ -93,8 +93,24 @@ const findDuplicateMobile = async (phone, exclude = {}) => {
   return user || employer || jobseeker;
 };
 
+const { validateEmail } = require('./emailValidator');
+
+const validateEmailAddress = (email = '') => {
+  const result = validateEmail(email);
+  if (!result.valid) {
+    const errorMsg = result.error || 'Please enter a valid email address';
+    const err = new Error(errorMsg);
+    err.isTypo = result.hasTypo;
+    err.suggestion = result.suggestion;
+    throw err;
+  }
+  return result.normalized;
+};
+
 module.exports = {
   normalizeEmail,
+  validateEmail,
+  validateEmailAddress,
   normalizeMobile,
   validateMobileNumber,
   generatePasswordFromNameAndPhone,
