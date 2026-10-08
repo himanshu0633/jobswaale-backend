@@ -669,7 +669,7 @@ exports.forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email: normalizedEmail, isDeleted: false });
     if (!user) {
-      return res.status(404).json({ message: 'Oops! Email is not in our database. Please try again.' });
+      return res.status(404).json({ message: 'Oops! This email address is not registered with us. Please check and try again.' });
     }
 
     // Generate secure random reset token

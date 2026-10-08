@@ -24,7 +24,7 @@ const protect = async (req, res, next) => {
     } catch (error) {
       if (error.name && error.name.startsWith('Mongo')) {
         console.error('Auth DB Error:', error.message);
-        return res.status(503).json({ message: 'Database connection unavailable. Please try again.' });
+        return res.status(503).json({ message: 'Service temporarily unavailable. Please try again in a moment.' });
       }
       console.error('Auth Error:', error.message);
       res.status(401).json({ message: 'Not authorized, token failed' });

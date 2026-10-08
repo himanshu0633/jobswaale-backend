@@ -64,7 +64,7 @@ app.use(async (req, res, next) => {
     next();
   } catch (err) {
     console.error('Database connection middleware error:', err);
-    res.status(500).json({ message: 'Database connection error. Please try again.' });
+    res.status(500).json({ message: 'Service temporarily unavailable. Please try again in a moment.' });
   }
 });
 app.get('/uploads/messages/:filename', async (req, res, next) => {
