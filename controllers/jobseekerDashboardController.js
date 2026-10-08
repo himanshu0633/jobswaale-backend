@@ -16,6 +16,7 @@ const Attachment = require('../models/Attachment');
 const SentOffer = require('../models/SentOffer');
 const Message = require('../models/Message');
 const { findDuplicateMobile, validateMobileNumber } = require('../utils/userCredentials');
+const { syncSkillsToDatabase } = require('./skillController');
 
 const GOOGLE_PROFILE_DUMMY_VALUES = {
   phone: 'Not Specified',
@@ -658,6 +659,7 @@ exports.updateJobseekerProfile = async (req, res) => {
           return res.status(400).json({ message: `Invalid skill: "${invalidSkill}". Skills must contain valid words or technologies (not solely numbers).` });
         }
         seeker.skills = skills.map(s => String(s).trim()).filter(Boolean);
+        await syncSkillsToDatabase(seeker.skills, req.user._id);
       } else {
         seeker.skills = [];
       }

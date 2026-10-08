@@ -19,6 +19,7 @@ const User = require('../models/User');
 const SupportTicket = require('../models/SupportTicket');
 const Attachment = require('../models/Attachment');
 const EmployerResumeUnlock = require('../models/EmployerResumeUnlock');
+const Skill = require('../models/Skill');
 const { getSettings } = require('../utils/settings');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
 const { seedEmployerPlansIfEmpty } = require('../utils/seedEmployerPlans');
@@ -591,7 +592,7 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     salaryMin: salary.min,
     salaryMax: salary.max,
     availability: candidate.status === 'active' ? 'Immediate' : '30 Days',
-    skills: [],
+    skills: Array.isArray(candidate.skills) ? candidate.skills.map(s => String(s).trim()).filter(Boolean) : [],
     industry: candidate.industryType?.industryType || candidate.industryType?.name || candidate.industryType?.industryName || '',
     gender: candidate.gender || '',
     languages: [],
@@ -806,6 +807,7 @@ exports.getEmployerCandidates = async (req, res) => {
     });
     const rawSearch = String(query.search || '').trim().toLowerCase();
     const employmentTypes = splitList(query.employmentTypes);
+    const selectedSkills = splitList(query.skills || query.skill);
     const minSalary = nullableNumber(query.minSalary);
     const maxSalary = nullableNumber(query.maxSalary);
 
@@ -821,7 +823,8 @@ exports.getEmployerCandidates = async (req, res) => {
         candidate.expectedSalary,
         candidate.industry,
         candidate.gender,
-        candidate.employmentType
+        candidate.employmentType,
+        (candidate.skills || []).join(' ')
       ].join(' ').toLowerCase();
 
       const matchesSearch = !rawSearch || searchable.includes(rawSearch);
@@ -837,8 +840,21 @@ exports.getEmployerCandidates = async (req, res) => {
       const matchesGender = !query.gender || candidate.gender === query.gender;
       const matchesCompany = !query.company || candidate.company.toLowerCase().includes(String(query.company).toLowerCase());
 
+      // AND Logic for Skills: Candidate must have ALL selected skills
+      const candidateSkills = (candidate.skills || []).map(s => String(s).trim().toLowerCase());
+      const matchesSkills = !selectedSkills.length || selectedSkills.every(reqSkill => {
+        const reqLower = reqSkill.toLowerCase().trim();
+        return candidateSkills.some(cSkill => {
+          if (cSkill === reqLower) return true;
+          const cleanC = cSkill.replace(/\.js$/i, '').trim();
+          const cleanReq = reqLower.replace(/\.js$/i, '').trim();
+          return cleanC === cleanReq;
+        });
+      });
+
       return matchesSearch && matchesRole && matchesLocation && matchesExperience && matchesQualification
-        && matchesMinSalary && matchesMaxSalary && matchesNotice && matchesEmployment && matchesIndustry && matchesGender && matchesCompany;
+        && matchesMinSalary && matchesMaxSalary && matchesNotice && matchesEmployment && matchesIndustry && matchesGender && matchesCompany
+        && matchesSkills;
     });
 
     switch (query.sortBy) {
@@ -861,6 +877,11 @@ exports.getEmployerCandidates = async (req, res) => {
 
     const { items, pagination } = paginate(mapped, query.page, query.limit);
 
+    const dbSkills = await Skill.find({ status: 'active' }).sort({ usageCount: -1, name: 1 }).select('name').lean();
+    const allSkillNames = dbSkills.length
+      ? dbSkills.map(s => s.name)
+      : [...new Set(candidates.flatMap(item => item.skills || []).filter(Boolean))];
+
     res.json({
       stats: {
         total: candidates.length,
@@ -875,7 +896,8 @@ exports.getEmployerCandidates = async (req, res) => {
         experiences: [...new Set(candidates.map(item => item.experience).filter(Boolean))],
         qualifications: [...new Set(candidates.map(item => item.qualification?.name).filter(Boolean))],
         industries: [...new Set(candidates.map(item => item.industryType?.industryType || item.industryType?.name || item.industryType?.industryName).filter(Boolean))],
-        employmentTypes: [...new Set(candidates.map(item => item.jobType?.jobType).filter(Boolean))]
+        employmentTypes: [...new Set(candidates.map(item => item.jobType?.jobType).filter(Boolean))],
+        skills: allSkillNames
       },
       candidates: items,
       pagination,

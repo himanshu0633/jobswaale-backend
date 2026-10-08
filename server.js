@@ -218,6 +218,7 @@ app.use('/api/payments', require('./routes/transactionRoutes'));
 app.use('/api/reports', require('./routes/reportRoutes'));
 app.use('/api/cron', require('./routes/cronRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/skills', require('./routes/skillRoutes'));
 
 
 // Root endpoint
