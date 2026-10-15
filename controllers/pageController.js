@@ -434,7 +434,9 @@ exports.uploadPageImage = async (req, res) => {
       console.warn('Could not cache CMS image in Attachment model:', attachmentErr);
     }
 
-    const publicOrigin = `${req.protocol}://${req.get('host')}`;
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.get('host');
+    const publicOrigin = `${proto}://${host}`;
     const relativeUrl = `/uploads/cms/${req.file.filename}`;
     const imageUrl = `${publicOrigin.replace(/\/+$/, '')}${relativeUrl}`;
 

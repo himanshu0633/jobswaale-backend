@@ -40,6 +40,7 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 connectDB().catch(err => console.error('Initial MongoDB connection failed:', err.message));
 
 const app = express();
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // Middleware
@@ -198,21 +199,31 @@ app.get('/uploads/employer-banners/:filename', async (req, res, next) => {
   }
 });
 
-app.get('/uploads/cms/:filename', async (req, res, next) => {
+app.get([
+  '/uploads/cms/:filename',
+  '/uploads/site/:filename',
+  '/uploads/:folder/:filename',
+  '/uploads/:filename'
+], async (req, res, next) => {
   try {
     const Attachment = require('./models/Attachment');
-    const file = await Attachment.findOne({ filename: req.params.filename });
+    const filename = req.params.filename;
+    let file = await Attachment.findOne({ filename });
+    if (!file) {
+      file = await Attachment.findOne({ originalName: filename });
+    }
     if (!file) {
       return next();
     }
     const fileBuffer = toFileBuffer(file.data);
     if (!fileBuffer.length) return next();
-    res.setHeader('Content-Type', file.mimeType || 'image/png');
+    res.setHeader('Content-Type', file.mimeType || 'image/jpeg');
     res.setHeader('Content-Length', fileBuffer.length);
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     return res.end(fileBuffer);
   } catch (err) {
-    console.error('Fetch CMS image error:', err);
+    console.error('Fetch uploaded file error:', err);
     next(err);
   }
 });

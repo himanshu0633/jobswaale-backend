@@ -1,3 +1,5 @@
+const fs = require('fs');
+const Attachment = require('../models/Attachment');
 const { getSettings, saveSettings, getPublicSettings, normalizeSettings } = require('../utils/settings');
 const { createTransportFromSettings, formatMailError, sendMailWithRetry } = require('../utils/mail');
 
@@ -63,9 +65,39 @@ exports.uploadImage = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ message: 'No image file uploaded' });
     }
-    const publicOrigin = `${req.protocol}://${req.get('host')}`;
-    const imageUrl = `${publicOrigin.replace(/\/+$/, '')}/uploads/site/${req.file.filename}`;
-    res.json({ message: 'Image uploaded successfully', imageUrl });
+
+    try {
+      const fileData = fs.readFileSync(req.file.path);
+      await Attachment.findOneAndUpdate(
+        { filename: req.file.filename },
+        {
+          filename: req.file.filename,
+          data: fileData,
+          mimeType: req.file.mimetype,
+          originalName: req.file.originalname,
+          size: req.file.size
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } catch (attachmentErr) {
+      console.warn('Could not cache site image in Attachment model:', attachmentErr);
+    }
+
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.get('host');
+    const publicOrigin = `${proto}://${host}`;
+    const relativeUrl = `/uploads/site/${req.file.filename}`;
+    const imageUrl = `${publicOrigin.replace(/\/+$/, '')}${relativeUrl}`;
+
+    res.json({
+      message: 'Image uploaded successfully',
+      imageUrl,
+      url: imageUrl,
+      default: imageUrl,
+      urls: { default: imageUrl },
+      relativeUrl,
+      filename: req.file.filename
+    });
   } catch (error) {
     console.error('Settings image upload error:', error);
     res.status(500).json({ message: error.message || 'Image upload failed' });
