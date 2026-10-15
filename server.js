@@ -89,7 +89,40 @@ app.get('/uploads/messages/:filename', async (req, res, next) => {
 app.get('/uploads/resumes/:filename', async (req, res, next) => {
   try {
     const Attachment = require('./models/Attachment');
-    const file = await Attachment.findOne({ filename: req.params.filename });
+    let file = await Attachment.findOne({ filename: req.params.filename });
+    if (!file) {
+      file = await Attachment.findOne({ originalName: req.params.filename });
+    }
+    if (!file) {
+      const JobSeeker = require('./models/JobSeeker');
+      const seeker = await JobSeeker.findOne({
+        $or: [
+          { resumeName: req.params.filename },
+          { resume: new RegExp(req.params.filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }
+        ]
+      }).select('resume');
+      if (seeker && seeker.resume) {
+        const actualFilename = seeker.resume.split('/').pop().split('?')[0];
+        if (actualFilename && actualFilename !== req.params.filename) {
+          file = await Attachment.findOne({ filename: actualFilename });
+        }
+      }
+    }
+    if (!file) {
+      const User = require('./models/User');
+      const user = await User.findOne({
+        $or: [
+          { resumeName: req.params.filename },
+          { resume: new RegExp(req.params.filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }
+        ]
+      }).select('resume');
+      if (user && user.resume) {
+        const actualFilename = user.resume.split('/').pop().split('?')[0];
+        if (actualFilename && actualFilename !== req.params.filename) {
+          file = await Attachment.findOne({ filename: actualFilename });
+        }
+      }
+    }
     if (!file) {
       return next();
     }
@@ -97,7 +130,9 @@ app.get('/uploads/resumes/:filename', async (req, res, next) => {
     if (!fileBuffer.length) return next();
     res.setHeader('Content-Type', file.mimeType || 'application/pdf');
     res.setHeader('Content-Length', fileBuffer.length);
-    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.originalName || req.params.filename)}"`);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     return res.end(fileBuffer);
   } catch (err) {
     console.error('Fetch resume error:', err);

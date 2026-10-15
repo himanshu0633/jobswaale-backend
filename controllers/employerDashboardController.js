@@ -605,6 +605,7 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     isRecent,
     isUnlocked: Boolean(showContacts),
     resume: allowDownload ? (candidate.resume || '') : '',
+    resumeName: candidate.resumeName || (candidate.name ? `${candidate.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_resume.pdf` : 'candidate_resume.pdf'),
     hasResume: Boolean(candidate.resume),
     allowResumeDownload: allowDownload
   };
@@ -1517,6 +1518,7 @@ exports.getEmployerApplicationDetails = async (req, res) => {
         noticePeriod: candidate.noticePeriod || 'Immediate',
         relocate: candidate.relocate === 'no' ? 'No' : 'Yes',
         resume: allowDownload ? (candidate.resume || '') : '',
+        resumeName: candidate.resumeName || (candidate.name ? `${candidate.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_resume.pdf` : 'candidate_resume.pdf'),
         hasResume: Boolean(candidate.resume),
         allowResumeDownload: allowDownload,
         bio: candidate.bio || '',
