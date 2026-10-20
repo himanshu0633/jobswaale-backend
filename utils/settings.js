@@ -105,7 +105,17 @@ const defaultSettings = {
       rating: 5,
       review: 'We are on the hunt for a designer who is exceptional in both making incredible product interfaces as well as'
     }
-  ]
+  ],
+
+  // Home Dashboard Promo / Announcement Popup Modal
+  showPromoPopup: true,
+  promoPopupImage: '/promo-banner.jpg',
+  promoPopupWidth: '550px',
+  promoPopupHeight: 'auto',
+  promoPopupButtonText: 'Upgrade Plan',
+  promoPopupButtonLink: '/employer/subscription',
+  promoPopupButtonEnabled: true,
+  promoPopupTarget: 'all'
 };
 
 const booleanKeys = [
@@ -129,7 +139,9 @@ const booleanKeys = [
   'showTopCompanies',
   'showDoubleCTA',
   'showMeetOurTeam',
-  'showHappyCustomers'
+  'showHappyCustomers',
+  'showPromoPopup',
+  'promoPopupButtonEnabled'
 ];
 
 const numberKeys = ['mailPort', 'minPassLen', 'passExpiry', 'maxLoginAttempts', 'lockoutDuration', 'maxFeaturedJobs', 'maxPopularCategories'];
@@ -188,6 +200,13 @@ const normalizeSettings = (input = {}) => {
     merged.happyCustomers = defaultSettings.happyCustomers;
   }
 
+  merged.promoPopupImage = String(merged.promoPopupImage || '').trim();
+  merged.promoPopupWidth = String(merged.promoPopupWidth || '550px').trim();
+  merged.promoPopupHeight = String(merged.promoPopupHeight || 'auto').trim();
+  merged.promoPopupButtonText = String(merged.promoPopupButtonText || 'Upgrade Plan').trim();
+  merged.promoPopupButtonLink = String(merged.promoPopupButtonLink || '/employer/subscription').trim();
+  merged.promoPopupTarget = String(merged.promoPopupTarget || 'all').trim();
+
   return merged;
 };
 
@@ -243,7 +262,15 @@ const getPublicSettings = (settings) => {
     showMeetOurTeam: safe.showMeetOurTeam,
     showHappyCustomers: safe.showHappyCustomers,
     teamMembers: safe.teamMembers,
-    happyCustomers: safe.happyCustomers
+    happyCustomers: safe.happyCustomers,
+    showPromoPopup: safe.showPromoPopup,
+    promoPopupImage: safe.promoPopupImage,
+    promoPopupWidth: safe.promoPopupWidth,
+    promoPopupHeight: safe.promoPopupHeight,
+    promoPopupButtonText: safe.promoPopupButtonText,
+    promoPopupButtonLink: safe.promoPopupButtonLink,
+    promoPopupButtonEnabled: safe.promoPopupButtonEnabled,
+    promoPopupTarget: safe.promoPopupTarget
   };
 };
 
