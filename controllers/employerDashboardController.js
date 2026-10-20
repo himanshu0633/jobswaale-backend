@@ -613,6 +613,9 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
 };
 
 const getJobDisplayStatus = (job) => {
+  if (job.status === 'requested' || job.editRequestStatus === 'pending') return 'Requested';
+  if (job.status === 'viewed' || job.editRequestStatus === 'viewed') return 'Request Viewed';
+  if (job.status === 'rejected' || job.editRequestStatus === 'rejected') return 'Rejected';
   if (job.publishStatus === 'draft' || job.status === 'pending') return 'Draft';
   const effectiveExpiry = job.jobExpiry || job.planValidity || null;
   const remainingDays = daysFromToday(effectiveExpiry);
@@ -3456,11 +3459,14 @@ exports.updateEmployerJob = async (req, res) => {
 
     const displayStatus = getJobDisplayStatus(existingJob);
     const isDraft = displayStatus === 'Draft' || existingJob.publishStatus === 'draft' || existingJob.status === 'pending';
-    const remainingDays = daysFromToday(existingJob.jobExpiry);
-    const isExpired = displayStatus === 'Expired' || existingJob.status === 'expired' || (remainingDays !== null && remainingDays < 0);
+    const isEditable = [
+      'active', 'requested', 'viewed', 'rejected', 'pending'
+    ].includes(existingJob.status) || [
+      'pending', 'viewed', 'rejected'
+    ].includes(existingJob.editRequestStatus) || isDraft;
 
-    if ((existingJob.status !== 'active' && !isDraft) || isExpired) {
-      return res.status(400).json({ message: 'Only active or draft jobs can be edited.' });
+    if (!isEditable || isExpired) {
+      return res.status(400).json({ message: 'Only active, draft, requested, or rejected jobs can be edited.' });
     }
 
     const {
@@ -3584,8 +3590,18 @@ exports.updateEmployerJob = async (req, res) => {
       planValidity: planValidity || jobExpiry || employer?.planValidity || existingJob.planValidity || null
     };
 
-    // If existing job is active or published and not saving as raw draft, send edit request to admin for review
-    if (existingJob.status === 'active' && finalPublishStatus !== 'draft') {
+    // If existing job is active, requested, viewed, or rejected and not saving as raw draft, send edit request to admin for review
+    const isJobInEditWorkflow = (
+      existingJob.status === 'active' ||
+      existingJob.status === 'requested' ||
+      existingJob.status === 'viewed' ||
+      existingJob.status === 'rejected' ||
+      existingJob.editRequestStatus === 'rejected' ||
+      existingJob.editRequestStatus === 'pending' ||
+      existingJob.editRequestStatus === 'viewed'
+    );
+
+    if (isJobInEditWorkflow && finalPublishStatus !== 'draft') {
       const previousData = {
         jobTitle: existingJob.jobTitle,
         jobCategory: existingJob.jobCategory,
@@ -3660,7 +3676,7 @@ exports.updateEmployerJob = async (req, res) => {
       checkDiff('benefits', existingJob.benefits, proposedData.benefits);
       checkDiff('jobExpiry', existingJob.jobExpiry ? new Date(existingJob.jobExpiry).toISOString().split('T')[0] : '', proposedData.jobExpiry ? new Date(proposedData.jobExpiry).toISOString().split('T')[0] : '');
 
-      let editRequest = await JobEditRequest.findOne({ job: existingJob._id, status: { $in: ['pending', 'viewed'] } });
+      let editRequest = await JobEditRequest.findOne({ job: existingJob._id, status: { $in: ['pending', 'viewed', 'rejected'] } }).sort({ createdAt: -1 });
       if (editRequest) {
         editRequest.previousData = previousData;
         editRequest.proposedData = proposedData;
@@ -3685,6 +3701,8 @@ exports.updateEmployerJob = async (req, res) => {
         });
       }
 
+      existingJob.status = 'requested';
+      existingJob.publishStatus = 'draft';
       existingJob.hasPendingEdit = true;
       existingJob.editRequestStatus = 'pending';
       existingJob.latestEditRequestId = editRequest._id;

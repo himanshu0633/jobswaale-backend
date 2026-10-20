@@ -110,6 +110,7 @@ exports.getJobRequestById = async (req, res) => {
       // Also update Job status
       if (request.job) {
         await Job.findByIdAndUpdate(request.job._id || request.job, {
+          status: 'viewed',
           editRequestStatus: 'viewed'
         });
       }
@@ -220,6 +221,8 @@ exports.rejectJobRequest = async (req, res) => {
     // Update Job
     const job = await Job.findById(request.job);
     if (job) {
+      job.status = 'rejected';
+      job.publishStatus = 'draft';
       job.hasPendingEdit = false;
       job.editRequestStatus = 'rejected';
       job.editRejectionReason = cleanReason;
