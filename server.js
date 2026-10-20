@@ -238,6 +238,7 @@ app.use(maintenanceGuard);
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/settings', require('./routes/settingsRoutes'));
+app.use('/api/admin/job-requests', require('./routes/jobRequestRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/masters', require('./routes/dashboardRoutes'));
 app.use('/api/masters', require('./routes/countryRoutes'));

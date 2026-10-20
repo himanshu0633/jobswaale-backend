@@ -221,6 +221,23 @@ const JobSchema = new mongoose.Schema({
     type: String,
     unique: true,
     sparse: true
+  },
+  hasPendingEdit: {
+    type: Boolean,
+    default: false
+  },
+  editRequestStatus: {
+    type: String,
+    enum: ['none', 'pending', 'viewed', 'approved', 'rejected'],
+    default: 'none'
+  },
+  latestEditRequestId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'JobEditRequest'
+  },
+  editRejectionReason: {
+    type: String,
+    default: ''
   }
 }, {
   timestamps: { createdAt: 'createDate', updatedAt: 'updateDate' }

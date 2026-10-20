@@ -19,6 +19,7 @@ const User = require('../models/User');
 const SupportTicket = require('../models/SupportTicket');
 const Attachment = require('../models/Attachment');
 const EmployerResumeUnlock = require('../models/EmployerResumeUnlock');
+const JobEditRequest = require('../models/JobEditRequest');
 const Skill = require('../models/Skill');
 const { getSettings } = require('../utils/settings');
 const { addAuditOnCreate, addAuditOnUpdate } = require('../utils/auditHelper');
@@ -727,7 +728,11 @@ exports.getEmployerJobs = async (req, res) => {
         applicants: applications,
         views,
         shortlisted,
-        interviews
+        interviews,
+        hasPendingEdit: Boolean(job.hasPendingEdit),
+        editRequestStatus: job.editRequestStatus || 'none',
+        editRejectionReason: job.editRejectionReason || '',
+        latestEditRequestId: job.latestEditRequestId || null
       };
     });
 
@@ -2440,6 +2445,10 @@ exports.getEmployerJobDetails = async (req, res) => {
       noticePeriod: job.noticePeriod || '',
       shiftTiming: job.shiftTiming || '',
       workMode: job.workMode || '',
+      hasPendingEdit: Boolean(job.hasPendingEdit),
+      editRequestStatus: job.editRequestStatus || 'none',
+      editRejectionReason: job.editRejectionReason || '',
+      latestEditRequestId: job.latestEditRequestId || null,
       form: {
         jobTitle: job.jobTitle || '',
         jobCategory: job.jobCategory?._id || job.jobCategory || '',
@@ -3533,51 +3542,170 @@ exports.updateEmployerJob = async (req, res) => {
       matchedCity?.cid ? Country.findOne({ cid: matchedCity.cid, isDeleted: { $ne: true } }).lean() : null
     ]);
 
+    const proposedData = {
+      jobTitle,
+      jobCategory,
+      jobType,
+      vacancies: Number(vacancies) || 1,
+      workMode: workMode || 'Office',
+      jobLocations: selectedLocations,
+      description: finalDescription,
+      jobSummary: jobSummary || '',
+      detailedDescription: detailedDescription || description || '',
+      responsibilities: responsibilities || '',
+      qualification: qualification || null,
+      experience: experience || requiredExperience,
+      requiredExperience: requiredExperience || experience || '',
+      salary: salary || '',
+      minSalary: nullableNumber(minSalary),
+      maxSalary: nullableNumber(maxSalary),
+      salaryUnit: salaryUnit || '',
+      salaryNegotiable: salaryNegotiable !== false,
+      noticePeriod: noticePeriod || '',
+      joiningDate: joiningDate || null,
+      shiftTiming: shiftTiming || '',
+      jobExpiry: jobExpiry || null,
+      benefits: benefits || '',
+      aboutCompany: aboutCompany || '',
+      skills: splitList(skills),
+      languages: splitList(languages),
+      candidateLocationPreference: candidateLocationPreference || '',
+      screeningQuestions: screeningQuestions || '',
+      publishStatus: finalPublishStatus,
+      country: country || matchedCountry?.countryName || employer?.country || existingJob.country || 'India',
+      state: state || matchedState?.stateName || employer?.state || existingJob.state || 'N/A',
+      district: district || matchedDistrict?.districtName || employer?.district || existingJob.district || 'N/A',
+      city: primaryCity || 'N/A',
+      companyName: companyName || employer?.companyName || req.user.companyName || existingJob.companyName || 'Employer',
+      contactPerson: contactPerson || employer?.contactPerson || existingJob.contactPerson || `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
+      email: email || req.user.email || existingJob.email,
+      phone: phone || employer?.phone || req.user.phone || existingJob.phone || 'N/A',
+      currentPlan: currentPlan || employer?.currentPlan || existingJob.currentPlan || null,
+      planValidity: planValidity || jobExpiry || employer?.planValidity || existingJob.planValidity || null
+    };
+
+    // If existing job is active or published and not saving as raw draft, send edit request to admin for review
+    if (existingJob.status === 'active' && finalPublishStatus !== 'draft') {
+      const previousData = {
+        jobTitle: existingJob.jobTitle,
+        jobCategory: existingJob.jobCategory,
+        jobType: existingJob.jobType,
+        vacancies: existingJob.vacancies,
+        workMode: existingJob.workMode,
+        jobLocations: existingJob.jobLocations || [],
+        description: existingJob.description,
+        jobSummary: existingJob.jobSummary || '',
+        detailedDescription: existingJob.detailedDescription || '',
+        responsibilities: existingJob.responsibilities || '',
+        qualification: existingJob.qualification,
+        experience: existingJob.experience,
+        requiredExperience: existingJob.requiredExperience,
+        salary: existingJob.salary,
+        minSalary: existingJob.minSalary,
+        maxSalary: existingJob.maxSalary,
+        salaryUnit: existingJob.salaryUnit,
+        salaryNegotiable: existingJob.salaryNegotiable,
+        noticePeriod: existingJob.noticePeriod,
+        joiningDate: existingJob.joiningDate,
+        shiftTiming: existingJob.shiftTiming,
+        jobExpiry: existingJob.jobExpiry,
+        benefits: existingJob.benefits,
+        aboutCompany: existingJob.aboutCompany,
+        skills: existingJob.skills || [],
+        languages: existingJob.languages || [],
+        candidateLocationPreference: existingJob.candidateLocationPreference || '',
+        screeningQuestions: existingJob.screeningQuestions || '',
+        country: existingJob.country,
+        state: existingJob.state,
+        district: existingJob.district,
+        city: existingJob.city,
+        companyName: existingJob.companyName,
+        contactPerson: existingJob.contactPerson,
+        email: existingJob.email,
+        phone: existingJob.phone
+      };
+
+      const changedFields = [];
+      const checkDiff = (field, oldVal, newVal) => {
+        if (Array.isArray(oldVal) || Array.isArray(newVal)) {
+          const a = (Array.isArray(oldVal) ? oldVal : []).map(x => String(x).trim()).sort().join(',');
+          const b = (Array.isArray(newVal) ? newVal : []).map(x => String(x).trim()).sort().join(',');
+          if (a !== b) changedFields.push(field);
+        } else if (String(oldVal || '').trim() !== String(newVal || '').trim()) {
+          changedFields.push(field);
+        }
+      };
+
+      checkDiff('jobTitle', existingJob.jobTitle, proposedData.jobTitle);
+      checkDiff('vacancies', existingJob.vacancies, proposedData.vacancies);
+      checkDiff('jobCategory', existingJob.jobCategory, proposedData.jobCategory);
+      checkDiff('jobType', existingJob.jobType, proposedData.jobType);
+      checkDiff('workMode', existingJob.workMode, proposedData.workMode);
+      checkDiff('experience', existingJob.experience, proposedData.experience);
+      checkDiff('salary', existingJob.salary, proposedData.salary);
+      checkDiff('minSalary', existingJob.minSalary, proposedData.minSalary);
+      checkDiff('maxSalary', existingJob.maxSalary, proposedData.maxSalary);
+      checkDiff('salaryUnit', existingJob.salaryUnit, proposedData.salaryUnit);
+      checkDiff('salaryNegotiable', existingJob.salaryNegotiable, proposedData.salaryNegotiable);
+      checkDiff('noticePeriod', existingJob.noticePeriod, proposedData.noticePeriod);
+      checkDiff('shiftTiming', existingJob.shiftTiming, proposedData.shiftTiming);
+      checkDiff('jobLocations', existingJob.jobLocations, proposedData.jobLocations);
+      checkDiff('city', existingJob.city, proposedData.city);
+      checkDiff('state', existingJob.state, proposedData.state);
+      checkDiff('description', existingJob.description, proposedData.description);
+      checkDiff('jobSummary', existingJob.jobSummary, proposedData.jobSummary);
+      checkDiff('responsibilities', existingJob.responsibilities, proposedData.responsibilities);
+      checkDiff('qualification', existingJob.qualification, proposedData.qualification);
+      checkDiff('skills', existingJob.skills, proposedData.skills);
+      checkDiff('benefits', existingJob.benefits, proposedData.benefits);
+      checkDiff('jobExpiry', existingJob.jobExpiry ? new Date(existingJob.jobExpiry).toISOString().split('T')[0] : '', proposedData.jobExpiry ? new Date(proposedData.jobExpiry).toISOString().split('T')[0] : '');
+
+      let editRequest = await JobEditRequest.findOne({ job: existingJob._id, status: { $in: ['pending', 'viewed'] } });
+      if (editRequest) {
+        editRequest.previousData = previousData;
+        editRequest.proposedData = proposedData;
+        editRequest.changedFields = changedFields.length ? changedFields : ['General Details'];
+        editRequest.status = 'pending';
+        editRequest.isViewed = false;
+        editRequest.rejectionReason = '';
+        await editRequest.save();
+      } else {
+        editRequest = await JobEditRequest.create({
+          job: existingJob._id,
+          employer: userId,
+          employerProfile: employer?._id,
+          jobTitle: proposedData.jobTitle,
+          companyName: proposedData.companyName,
+          planName: activePlan?.planName || employer?.currentPlan?.planName || 'Standard',
+          previousData,
+          proposedData,
+          changedFields: changedFields.length ? changedFields : ['General Details'],
+          status: 'pending',
+          isViewed: false
+        });
+      }
+
+      existingJob.hasPendingEdit = true;
+      existingJob.editRequestStatus = 'pending';
+      existingJob.latestEditRequestId = editRequest._id;
+      existingJob.editRejectionReason = '';
+      await existingJob.save();
+
+      return res.json({
+        message: 'Job edit request submitted successfully. It will be published once approved by admin.',
+        requestSubmitted: true,
+        editRequest,
+        job: existingJob
+      });
+    }
+
     const settings = await getSettings();
     const requireApproval = settings?.jobApprovalRequired !== false;
 
     const updatedJob = await Job.findByIdAndUpdate(
       existingJob._id,
       {
-        jobTitle,
-        jobCategory,
-        jobType,
-        vacancies: Number(vacancies) || 1,
-        workMode: workMode || 'Office',
-        jobLocations: selectedLocations,
-        description: finalDescription,
-        jobSummary: jobSummary || '',
-        detailedDescription: detailedDescription || description || '',
-        responsibilities: responsibilities || '',
-        qualification: qualification || null,
-        experience: experience || requiredExperience,
-        requiredExperience: requiredExperience || experience || '',
-        salary: salary || '',
-        minSalary: nullableNumber(minSalary),
-        maxSalary: nullableNumber(maxSalary),
-        salaryUnit: salaryUnit || '',
-        salaryNegotiable: salaryNegotiable !== false,
-        noticePeriod: noticePeriod || '',
-        joiningDate: joiningDate || null,
-        shiftTiming: shiftTiming || '',
-        jobExpiry: jobExpiry || null,
-        benefits: benefits || '',
-        aboutCompany: aboutCompany || '',
-        skills: splitList(skills),
-        languages: splitList(languages),
-        candidateLocationPreference: candidateLocationPreference || '',
-        screeningQuestions: screeningQuestions || '',
-        publishStatus: finalPublishStatus,
-        country: country || matchedCountry?.countryName || employer?.country || existingJob.country || 'India',
-        state: state || matchedState?.stateName || employer?.state || existingJob.state || 'N/A',
-        district: district || matchedDistrict?.districtName || employer?.district || existingJob.district || 'N/A',
-        city: primaryCity || 'N/A',
-        companyName: companyName || employer?.companyName || req.user.companyName || existingJob.companyName || 'Employer',
-        contactPerson: contactPerson || employer?.contactPerson || existingJob.contactPerson || `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
-        email: email || req.user.email || existingJob.email,
-        phone: phone || employer?.phone || req.user.phone || existingJob.phone || 'N/A',
-        currentPlan: currentPlan || employer?.currentPlan || existingJob.currentPlan || null,
-        planValidity: planValidity || jobExpiry || employer?.planValidity || existingJob.planValidity || null,
+        ...proposedData,
         status: finalPublishStatus === 'draft' ? 'pending' : (existingJob.status === 'active' ? 'active' : (requireApproval ? 'inactive' : 'active')),
         updatedLogin: userId,
         statusUpdatedBy: userId,
