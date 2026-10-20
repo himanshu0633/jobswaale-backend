@@ -110,12 +110,28 @@ const defaultSettings = {
   // Home Dashboard Promo / Announcement Popup Modal
   showPromoPopup: true,
   promoPopupImage: '/promo-banner.jpg',
-  promoPopupWidth: '550px',
+  promoPopupWidth: '850px',
   promoPopupHeight: 'auto',
   promoPopupButtonText: 'Upgrade Plan',
   promoPopupButtonLink: '/employer/subscription',
   promoPopupButtonEnabled: true,
-  promoPopupTarget: 'all'
+  promoPopupTarget: 'employer',
+
+  // Popup Banners List (Multi-banner with page targeting)
+  popupBanners: [
+    {
+      id: 'banner_employer_plans',
+      title: 'Employer Subscription Plans',
+      enabled: true,
+      image: '/promo-banner.jpg',
+      width: '850px',
+      height: 'auto',
+      buttonEnabled: true,
+      buttonText: 'Upgrade Plan',
+      buttonLink: '/employer/subscription',
+      pages: ['employer_login']
+    }
+  ]
 };
 
 const booleanKeys = [
@@ -201,11 +217,48 @@ const normalizeSettings = (input = {}) => {
   }
 
   merged.promoPopupImage = String(merged.promoPopupImage || '').trim();
-  merged.promoPopupWidth = String(merged.promoPopupWidth || '550px').trim();
+  merged.promoPopupWidth = String(merged.promoPopupWidth || '850px').trim();
   merged.promoPopupHeight = String(merged.promoPopupHeight || 'auto').trim();
   merged.promoPopupButtonText = String(merged.promoPopupButtonText || 'Upgrade Plan').trim();
   merged.promoPopupButtonLink = String(merged.promoPopupButtonLink || '/employer/subscription').trim();
-  merged.promoPopupTarget = String(merged.promoPopupTarget || 'all').trim();
+  merged.promoPopupTarget = String(merged.promoPopupTarget || 'employer').trim();
+
+  // Multi-banner normalization
+  if (Array.isArray(merged.popupBanners) && merged.popupBanners.length > 0) {
+    merged.popupBanners = merged.popupBanners
+      .filter((b) => b && typeof b === 'object')
+      .map((b, idx) => ({
+        id: String(b.id || `banner_${Date.now()}_${idx}`).trim(),
+        title: String(b.title || `Banner ${idx + 1}`).trim(),
+        enabled: b.enabled !== false,
+        image: String(b.image || '').trim(),
+        width: String(b.width || '850px').trim(),
+        height: String(b.height || 'auto').trim(),
+        buttonEnabled: b.buttonEnabled !== false,
+        buttonText: String(b.buttonText || 'Upgrade Plan').trim(),
+        buttonLink: String(b.buttonLink || '/employer/subscription').trim(),
+        pages: Array.isArray(b.pages) && b.pages.length > 0
+          ? b.pages.map(p => String(p).trim()).filter(Boolean)
+          : ['employer_login']
+      }));
+  } else if (merged.promoPopupImage) {
+    merged.popupBanners = [
+      {
+        id: 'banner_employer_plans',
+        title: 'Employer Subscription Plans',
+        enabled: merged.showPromoPopup !== false,
+        image: String(merged.promoPopupImage || '/promo-banner.jpg').trim(),
+        width: String(merged.promoPopupWidth || '850px').trim(),
+        height: String(merged.promoPopupHeight || 'auto').trim(),
+        buttonEnabled: merged.promoPopupButtonEnabled !== false,
+        buttonText: String(merged.promoPopupButtonText || 'Upgrade Plan').trim(),
+        buttonLink: String(merged.promoPopupButtonLink || '/employer/subscription').trim(),
+        pages: ['employer_login']
+      }
+    ];
+  } else {
+    merged.popupBanners = defaultSettings.popupBanners;
+  }
 
   return merged;
 };
@@ -270,7 +323,8 @@ const getPublicSettings = (settings) => {
     promoPopupButtonText: safe.promoPopupButtonText,
     promoPopupButtonLink: safe.promoPopupButtonLink,
     promoPopupButtonEnabled: safe.promoPopupButtonEnabled,
-    promoPopupTarget: safe.promoPopupTarget
+    promoPopupTarget: safe.promoPopupTarget,
+    popupBanners: safe.popupBanners
   };
 };
 
