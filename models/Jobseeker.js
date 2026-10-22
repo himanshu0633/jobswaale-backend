@@ -74,6 +74,16 @@ const JobseekerSchema = new mongoose.Schema({
       type: String,
       default: '',
       trim: true
+    },
+    location: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    jobLocation: {
+      type: String,
+      default: '',
+      trim: true
     }
   }],
   currentSalary: {
@@ -99,6 +109,11 @@ const JobseekerSchema = new mongoose.Schema({
   annualSalary: {
     type: Number,
     default: 0
+  },
+  currentJobLocation: {
+    type: String,
+    default: '',
+    trim: true
   },
   preferredLocation: {
     type: String

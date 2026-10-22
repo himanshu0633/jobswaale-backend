@@ -172,9 +172,11 @@ const normalizeExperiences = (experiences = []) => {
       startDate: String(item?.startDate || '').slice(0, 7),
       endDate: item?.currentlyWorking ? '' : String(item?.endDate || '').slice(0, 7),
       currentlyWorking: Boolean(item?.currentlyWorking),
-      description: String(item?.description || item?.body || '').trim()
+      description: String(item?.description || item?.body || '').trim(),
+      location: String(item?.location || item?.jobLocation || '').trim(),
+      jobLocation: String(item?.location || item?.jobLocation || '').trim()
     }))
-    .filter(item => item.position || item.company || item.startDate || item.endDate || item.description);
+    .filter(item => item.position || item.company || item.startDate || item.endDate || item.description || item.location);
 };
 
 const validateExperiencePeriods = (experiences = []) => {
@@ -562,6 +564,7 @@ exports.updateJobseekerProfile = async (req, res) => {
       district,
       address,
       pinCode,
+      currentJobLocation,
       designation,
       relocate,
       experience,
@@ -620,6 +623,7 @@ exports.updateJobseekerProfile = async (req, res) => {
     if (district !== undefined) seeker.district = district;
     if (address !== undefined) seeker.address = address;
     if (pinCode !== undefined) seeker.pinCode = pinCode;
+    if (currentJobLocation !== undefined) seeker.currentJobLocation = String(currentJobLocation || '').trim();
     if (designation !== undefined) seeker.designation = designation;
     if (relocate !== undefined) seeker.relocate = relocate;
     if (experience !== undefined) seeker.experience = experience;
@@ -629,6 +633,14 @@ exports.updateJobseekerProfile = async (req, res) => {
         return res.status(400).json({ message: result.error });
       }
       seeker.experiences = result.experiences;
+
+      // If currentJobLocation is not explicitly set, auto-sync from currently working experience
+      if (!seeker.currentJobLocation) {
+        const curExp = result.experiences.find(e => e.currentlyWorking && (e.location || e.jobLocation));
+        if (curExp) {
+          seeker.currentJobLocation = (curExp.location || curExp.jobLocation).trim();
+        }
+      }
     }
     if (currentMonthlySalary !== undefined) seeker.currentMonthlySalary = Math.max(0, Number(currentMonthlySalary) || 0);
     if (currentAnnualSalary !== undefined) seeker.currentAnnualSalary = Math.max(0, Number(currentAnnualSalary) || 0);

@@ -368,6 +368,7 @@ exports.updateJobseeker = async (req, res) => {
         experience,
         currentSalary,
         expectedSalary,
+        currentJobLocation: req.body.currentJobLocation !== undefined ? req.body.currentJobLocation : jobseeker.currentJobLocation,
         preferredLocation,
         country,
         state,

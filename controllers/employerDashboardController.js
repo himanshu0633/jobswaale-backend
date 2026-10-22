@@ -628,6 +628,9 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     city: candidate.city || '',
     state: candidate.state || '',
     district: candidate.district || '',
+    currentJobLocation: candidate.currentJobLocation || (candidate.experiences || []).find(e => e.currentlyWorking)?.location || '',
+    preferredLocation: candidate.preferredLocation || '',
+    relocate: candidate.relocate || 'yes',
     role: candidate.jobCategory?.categoryName || 'Candidate',
     jobCategory: candidate.jobCategory?.categoryName || '',
     designation: candidate.designation || candidate.jobCategory?.categoryName || '',
@@ -872,7 +875,10 @@ exports.getEmployerCandidates = async (req, res) => {
     const selectedSkills = splitList(query.skills || query.skill);
     const minExp = nullableNumber(query.minExp ?? query.minExperience);
     const maxExp = nullableNumber(query.maxExp ?? query.maxExperience);
-    const locationQuery = String(query.location || '').trim().toLowerCase();
+    const locationQuery = String(query.location || query.locations || '').trim();
+    const selectedLocations = splitList(locationQuery).map(l => l.trim().toLowerCase()).filter(Boolean);
+    const includeRelocate = query.includeRelocate !== 'false' && query.includeRelocate !== false;
+    const excludeAnywhere = query.excludeAnywhere === 'true' || query.excludeAnywhere === true;
     const minSalary = nullableNumber(query.minSalary);
     const maxSalary = nullableNumber(query.maxSalary);
     const genderQuery = String(query.gender || '').trim().toLowerCase();
@@ -896,7 +902,12 @@ exports.getEmployerCandidates = async (req, res) => {
 
         const broaderSearch = [
           titleAndSkills,
+          candidate.currentJobLocation,
+          candidate.preferredLocation,
           candidate.location,
+          candidate.city,
+          candidate.district,
+          candidate.state,
           candidate.qualification,
           candidate.industry,
           candidate.jobCategory
@@ -942,11 +953,44 @@ exports.getEmployerCandidates = async (req, res) => {
         matchesExp = candidate.experience.toLowerCase().includes(String(query.experience).toLowerCase());
       }
 
-      // 3. Location: Candidate's Current Location
+      // 3. Location: Candidate's Current Location & Relocate (Preferred Location)
       let matchesLocation = true;
-      if (locationQuery) {
-        const locHaystack = [candidate.location, candidate.city, candidate.state, candidate.district].filter(Boolean).join(' ').toLowerCase();
-        matchesLocation = locHaystack.includes(locationQuery);
+      if (selectedLocations.length > 0) {
+        const currentLocItems = [
+          candidate.currentJobLocation,
+          candidate.city,
+          candidate.district,
+          candidate.state,
+          candidate.location,
+          ...(candidate.experiences || []).map(e => e.location || e.jobLocation)
+        ].filter(Boolean).map(s => String(s).trim().toLowerCase());
+
+        const currentLocHaystack = currentLocItems.join(' ');
+
+        // Check if candidate matches current location
+        const matchesCurrent = selectedLocations.some(loc => {
+          return currentLocItems.some(item => item === loc || item.includes(loc) || loc.includes(item)) || currentLocHaystack.includes(loc);
+        });
+
+        // Check relocate / preferred location
+        const isWillingToRelocate = String(candidate.relocate || 'yes').trim().toLowerCase() === 'yes';
+        let matchesPreferred = false;
+
+        if (includeRelocate && isWillingToRelocate) {
+          const prefStr = String(candidate.preferredLocation || '').trim().toLowerCase();
+          const prefItems = prefStr.split(',').map(s => s.trim()).filter(Boolean);
+          const mentionsAnywhere = prefStr.includes('anywhere');
+
+          if (excludeAnywhere && mentionsAnywhere) {
+            matchesPreferred = false;
+          } else {
+            matchesPreferred = selectedLocations.some(loc => {
+              return prefItems.some(item => item === loc || item.includes(loc) || loc.includes(item)) || prefStr.includes(loc);
+            });
+          }
+        }
+
+        matchesLocation = matchesCurrent || matchesPreferred;
       }
 
       // 4. Salary: Minimum and Maximum
@@ -1109,9 +1153,14 @@ exports.getEmployerCandidates = async (req, res) => {
         categories: allJobCategories,
         departments: allJobCategories,
         industryTypes: allIndustryTypes,
-        industries: allIndustryTypes,
-        locations: [...new Set(candidates.map(item => [item.city, item.state].filter(Boolean).join(', ')).filter(Boolean))],
-        experiences: [...new Set(candidates.map(item => item.experience).filter(Boolean))],
+        locations: [...new Set(candidates.flatMap(item => [
+          item.city,
+          item.district,
+          item.state,
+          item.currentJobLocation,
+          [item.city, item.state].filter(Boolean).join(', '),
+          ...(item.preferredLocation ? item.preferredLocation.split(',').map(s => s.trim()) : [])
+        ]).filter(Boolean))],
         qualifications: allQualifications,
         employmentTypes: [...new Set(candidates.map(item => item.jobType?.jobType).filter(Boolean))],
         skills: allSkillNames
