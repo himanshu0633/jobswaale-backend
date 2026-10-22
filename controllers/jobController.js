@@ -153,6 +153,26 @@ exports.getJobs = async (req, res) => {
       ];
     }
 
+    const searchQuery = String(req.query.q || req.query.search || req.query.keyword || '').trim();
+    if (searchQuery) {
+      const searchRegex = new RegExp(searchQuery.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), 'i');
+      filter.$and = filter.$and || [];
+      filter.$and.push({
+        $or: [
+          { jobTitle: { $regex: searchRegex } },
+          { skills: { $regex: searchRegex } },
+          { companyName: { $regex: searchRegex } }
+        ]
+      });
+    }
+
+    const skillQuery = String(req.query.skill || '').trim();
+    if (skillQuery) {
+      const skillRegex = new RegExp(skillQuery.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), 'i');
+      filter.$and = filter.$and || [];
+      filter.$and.push({ skills: { $regex: skillRegex } });
+    }
+
     const list = await Job.find(filter)
       .populate('jobCategory')
       .populate('jobType')
