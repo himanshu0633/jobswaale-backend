@@ -629,6 +629,7 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     state: candidate.state || '',
     district: candidate.district || '',
     role: candidate.jobCategory?.categoryName || 'Candidate',
+    jobCategory: candidate.jobCategory?.categoryName || '',
     designation: candidate.designation || candidate.jobCategory?.categoryName || '',
     experience: candidate.experience || 'Fresher',
     experienceValue: getExperienceValue(candidate.experience),
@@ -642,6 +643,7 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     availability: candidate.status === 'active' ? 'Immediate' : '30 Days',
     skills: Array.isArray(candidate.skills) ? candidate.skills.map(s => String(s).trim()).filter(Boolean) : [],
     industry: candidate.industryType?.industryType || candidate.industryType?.name || candidate.industryType?.industryName || '',
+    industryType: candidate.industryType?.industryType || candidate.industryType?.name || candidate.industryType?.industryName || '',
     gender: candidate.gender || 'Not specified',
     languages: [],
     company: candidate.currentPlan?.planName || '',
@@ -875,7 +877,8 @@ exports.getEmployerCandidates = async (req, res) => {
     const maxSalary = nullableNumber(query.maxSalary);
     const genderQuery = String(query.gender || '').trim().toLowerCase();
     const qualificationQuery = String(query.qualification || '').trim().toLowerCase();
-    const departmentQuery = String(query.department || query.industry || query.role || '').trim().toLowerCase();
+    const industryQuery = String(query.industryType || query.industry || '').trim().toLowerCase();
+    const jobCategoryQuery = String(query.jobCategory || query.category || query.department || query.role || '').trim().toLowerCase();
     const activityQuery = String(query.activity || query.activityWithin || '').trim().toLowerCase();
     const employmentTypes = splitList(query.employmentTypes);
 
@@ -895,7 +898,8 @@ exports.getEmployerCandidates = async (req, res) => {
           titleAndSkills,
           candidate.location,
           candidate.qualification,
-          candidate.industry
+          candidate.industry,
+          candidate.jobCategory
         ].join(' ').toLowerCase();
 
         matchesSearch = broaderSearch.includes(rawSearch);
@@ -967,14 +971,21 @@ exports.getEmployerCandidates = async (req, res) => {
         matchesQual = qualHaystack.includes(qualificationQuery);
       }
 
-      // 7. Department / Industry: QA, QC, Production, HR, Pharma, etc.
-      let matchesDept = true;
-      if (departmentQuery && departmentQuery !== 'all' && departmentQuery !== 'all industries' && departmentQuery !== 'all departments') {
-        const deptHaystack = [candidate.industry, candidate.role, candidate.designation].filter(Boolean).join(' ').toLowerCase();
-        matchesDept = deptHaystack.includes(departmentQuery);
+      // 7. Industry Type: Pharmaceutical, Biotechnology, Healthcare, Chemical, etc.
+      let matchesIndustry = true;
+      if (industryQuery && industryQuery !== 'all' && industryQuery !== 'all industries' && industryQuery !== 'all industry types') {
+        const indHaystack = [candidate.industryType, candidate.industry].filter(Boolean).join(' ').toLowerCase();
+        matchesIndustry = indHaystack.includes(industryQuery);
       }
 
-      // 8. Candidate Activity: Active within 3 months, 6 months, or All Candidates
+      // 8. Job Category / Department: QA, QC, Production, Regulatory Affairs, R&D, Packaging, HR, etc.
+      let matchesJobCategory = true;
+      if (jobCategoryQuery && jobCategoryQuery !== 'all' && jobCategoryQuery !== 'all categories' && jobCategoryQuery !== 'all job categories' && jobCategoryQuery !== 'all departments') {
+        const catHaystack = [candidate.jobCategory, candidate.role, candidate.designation].filter(Boolean).join(' ').toLowerCase();
+        matchesJobCategory = catHaystack.includes(jobCategoryQuery);
+      }
+
+      // 9. Candidate Activity: Active within 3 months, 6 months, or All Candidates
       let matchesActivity = true;
       if (activityQuery && activityQuery !== 'all' && activityQuery !== 'all candidates') {
         const actTime = candidate.activityDate;
@@ -997,7 +1008,7 @@ exports.getEmployerCandidates = async (req, res) => {
       const matchesCompany = !query.company || candidate.company.toLowerCase().includes(String(query.company).toLowerCase());
 
       return matchesSearch && matchesTitle && matchesSkills && matchesExp && matchesLocation
-        && matchesSalary && matchesGender && matchesQual && matchesDept && matchesActivity
+        && matchesSalary && matchesGender && matchesQual && matchesIndustry && matchesJobCategory && matchesActivity
         && matchesEmployment && matchesCompany;
     });
 
@@ -1022,10 +1033,11 @@ exports.getEmployerCandidates = async (req, res) => {
 
     const { items, pagination } = paginate(mapped, query.page, query.limit);
 
-    const [dbSkills, dbQualifications, dbIndustries] = await Promise.all([
+    const [dbSkills, dbQualifications, dbIndustries, dbJobCategories] = await Promise.all([
       Skill.find({ status: 'active' }).sort({ usageCount: -1, name: 1 }).select('name').lean().catch(() => []),
       Qualification.find({ status: 'active' }).sort({ sortingNo: 1, name: 1 }).select('name').lean().catch(() => []),
-      IndustryType.find({ status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).select('industryType').lean().catch(() => [])
+      IndustryType.find({ status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).select('industryType name industryName').lean().catch(() => []),
+      JobCategory.find({ status: 'active' }).sort({ sortingNo: 1, categoryName: 1 }).select('categoryName name').lean().catch(() => [])
     ]);
 
     const allSkillNames = dbSkills.length
@@ -1038,10 +1050,48 @@ exports.getEmployerCandidates = async (req, res) => {
       ...dbQualifications.map(q => q.name).filter(Boolean)
     ])];
 
-    const allIndustries = [...new Set([
-      'QA (Quality Assurance)', 'QC (Quality Control)', 'Production', 'Regulatory Affairs (RA)', 'R&D / Formulation', 'Packaging', 'HR & Admin', 'Sales & Marketing', 'Pharmaceutical', 'Biotechnology', 'Healthcare',
-      ...candidates.map(item => item.industryType?.industryType || item.industryType?.name || item.industryType?.industryName).filter(Boolean),
-      ...dbIndustries.map(i => i.industryType).filter(Boolean),
+    const standardIndustries = [
+      'Pharmaceutical',
+      'Biotechnology',
+      'Healthcare & Hospitals',
+      'Chemical & Petrochemical',
+      'Medical Devices',
+      'Clinical Research (CRO)',
+      'FMCG / Food & Beverage',
+      'Cosmetics & Personal Care',
+      'Ayush / Herbal & Ayurvedic',
+      'Information Technology / Pharma IT',
+      'Manufacturing',
+      'Packaging & Logistics'
+    ];
+
+    const allIndustryTypes = [...new Set([
+      ...standardIndustries,
+      ...dbIndustries.map(i => i.industryType || i.name || i.industryName).filter(Boolean),
+      ...candidates.map(item => item.industryType?.industryType || item.industryType?.name || item.industryType?.industryName).filter(Boolean)
+    ])];
+
+    const standardJobCategories = [
+      'Quality Assurance (QA)',
+      'Quality Control (QC)',
+      'Production & Manufacturing',
+      'Regulatory Affairs (RA)',
+      'R&D / Formulation',
+      'Analytical Development (AR&D)',
+      'Microbiology',
+      'Packaging & Labeling',
+      'Maintenance & Engineering',
+      'Pharmacovigilance (PV)',
+      'Clinical Operations',
+      'Supply Chain & Warehouse',
+      'Human Resources (HR)',
+      'Sales & Marketing',
+      'Administration'
+    ];
+
+    const allJobCategories = [...new Set([
+      ...standardJobCategories,
+      ...dbJobCategories.map(c => c.categoryName || c.name).filter(Boolean),
       ...candidates.map(item => item.jobCategory?.categoryName).filter(Boolean)
     ])];
 
@@ -1054,12 +1104,15 @@ exports.getEmployerCandidates = async (req, res) => {
         activeToday: mapped.filter(item => item.activeToday).length
       },
       filters: {
-        roles: [...new Set(candidates.map(item => item.jobCategory?.categoryName).filter(Boolean))],
+        roles: allJobCategories,
+        jobCategories: allJobCategories,
+        categories: allJobCategories,
+        departments: allJobCategories,
+        industryTypes: allIndustryTypes,
+        industries: allIndustryTypes,
         locations: [...new Set(candidates.map(item => [item.city, item.state].filter(Boolean).join(', ')).filter(Boolean))],
         experiences: [...new Set(candidates.map(item => item.experience).filter(Boolean))],
         qualifications: allQualifications,
-        industries: allIndustries,
-        departments: allIndustries,
         employmentTypes: [...new Set(candidates.map(item => item.jobType?.jobType).filter(Boolean))],
         skills: allSkillNames
       },
