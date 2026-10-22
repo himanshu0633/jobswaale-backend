@@ -486,10 +486,32 @@ const getExperienceValue = (value = '') => {
   return Math.max(...numbers.map(Number));
 };
 
-const parseSalaryRange = (value = '') => {
-  const numbers = String(value).match(/\d+(\.\d+)?/g) || [];
-  const min = numbers[0] ? Number(numbers[0]) : null;
-  const max = numbers[1] ? Number(numbers[1]) : min;
+const parseSalaryRange = (value = '', candidate = null) => {
+  if (candidate) {
+    if (candidate.annualSalary && candidate.annualSalary > 1000) {
+      const lpa = Number((candidate.annualSalary / 100000).toFixed(2));
+      return { min: lpa, max: lpa };
+    }
+    if (candidate.currentAnnualSalary && candidate.currentAnnualSalary > 1000) {
+      const lpa = Number((candidate.currentAnnualSalary / 100000).toFixed(2));
+      return { min: lpa, max: lpa };
+    }
+    if (candidate.monthlySalary && candidate.monthlySalary > 100) {
+      const lpa = Number(((candidate.monthlySalary * 12) / 100000).toFixed(2));
+      return { min: lpa, max: lpa };
+    }
+    if (candidate.currentMonthlySalary && candidate.currentMonthlySalary > 100) {
+      const lpa = Number(((candidate.currentMonthlySalary * 12) / 100000).toFixed(2));
+      return { min: lpa, max: lpa };
+    }
+  }
+
+  const raw = `${value || ''} ${candidate?.currentSalary || ''}`;
+  const numbers = String(raw).match(/\d+(\.\d+)?/g) || [];
+  if (!numbers.length) return { min: null, max: null };
+  const parsedNums = numbers.map(Number).map(n => (n > 1000 ? Number((n / 100000).toFixed(2)) : n));
+  const min = Math.min(...parsedNums);
+  const max = Math.max(...parsedNums);
   return { min, max };
 };
 
@@ -571,12 +593,31 @@ const getCandidateIdsForListSearch = async (searchRegex, extraMatch = {}) => {
 };
 
 const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload = true, hasCandidateAccess = true) => {
-  const salary = parseSalaryRange(candidate.expectedSalary);
+  const salary = parseSalaryRange(candidate.expectedSalary, candidate);
   const createdAt = candidate.createDate || candidate.createdAt;
   const isRecent = createdAt && (Date.now() - new Date(createdAt).getTime()) <= 7 * 24 * 60 * 60 * 1000;
   const updatedToday = candidate.updateDate && new Date(candidate.updateDate).toDateString() === new Date().toDateString();
 
   const hiddenText = hasCandidateAccess ? 'Hidden (Unlock to View)' : 'Hidden (Upgrade Plan)';
+
+  const dates = [
+    candidate.updateDate,
+    candidate.createDate,
+    candidate.userId?.lastLogin,
+    candidate.updatedAt,
+    candidate.createdAt
+  ].filter(Boolean).map(d => new Date(d).getTime()).filter(t => !isNaN(t));
+  const activityDate = dates.length ? Math.max(...dates) : null;
+  const diffDays = activityDate ? Math.floor((Date.now() - activityDate) / (24 * 60 * 60 * 1000)) : null;
+  let lastActiveText = 'Recently';
+  if (diffDays !== null) {
+    if (diffDays === 0) lastActiveText = 'Active Today';
+    else if (diffDays === 1) lastActiveText = 'Active Yesterday';
+    else if (diffDays < 30) lastActiveText = `Active ${diffDays}d ago`;
+    else if (diffDays < 90) lastActiveText = `Active ${Math.floor(diffDays / 30)}mo ago`;
+    else if (diffDays < 180) lastActiveText = 'Active within 6mo';
+    else lastActiveText = 'Active > 6mo ago';
+  }
 
   return {
     id: candidate._id,
@@ -584,10 +625,16 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     email: showContacts ? (candidate.userId?.email || '') : hiddenText,
     phone: showContacts ? (candidate.phone || '') : hiddenText,
     location: [candidate.city, candidate.state].filter(Boolean).join(', ') || candidate.preferredLocation || 'N/A',
+    city: candidate.city || '',
+    state: candidate.state || '',
+    district: candidate.district || '',
     role: candidate.jobCategory?.categoryName || 'Candidate',
+    designation: candidate.designation || candidate.jobCategory?.categoryName || '',
     experience: candidate.experience || 'Fresher',
     experienceValue: getExperienceValue(candidate.experience),
-    qualification: candidate.qualification?.name || '',
+    experiences: Array.isArray(candidate.experiences) ? candidate.experiences : [],
+    qualification: candidate.qualification?.name || candidate.studyField || '',
+    studyField: candidate.studyField || '',
     currentSalary: candidate.currentSalary || (candidate.currentAnnualSalary ? `₹${(candidate.currentAnnualSalary / 100000).toFixed(1).replace(/\.0$/, '')} LPA` : (candidate.currentMonthlySalary ? `₹${candidate.currentMonthlySalary.toLocaleString('en-IN')}/mo` : 'Not specified')),
     expectedSalary: candidate.expectedSalary || 'Not specified',
     salaryMin: salary.min,
@@ -595,7 +642,7 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     availability: candidate.status === 'active' ? 'Immediate' : '30 Days',
     skills: Array.isArray(candidate.skills) ? candidate.skills.map(s => String(s).trim()).filter(Boolean) : [],
     industry: candidate.industryType?.industryType || candidate.industryType?.name || candidate.industryType?.industryName || '',
-    gender: candidate.gender || '',
+    gender: candidate.gender || 'Not specified',
     languages: [],
     company: candidate.currentPlan?.planName || '',
     age: null,
@@ -608,7 +655,9 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     resume: allowDownload ? (candidate.resume || '') : '',
     resumeName: candidate.resumeName || (candidate.name ? `${candidate.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_resume.pdf` : 'candidate_resume.pdf'),
     hasResume: Boolean(candidate.resume),
-    allowResumeDownload: allowDownload
+    allowResumeDownload: allowDownload,
+    activityDate,
+    lastActive: lastActiveText
   };
 };
 
@@ -764,7 +813,7 @@ exports.getEmployerCandidates = async (req, res) => {
     const query = req.query || {};
     const candidates = await Jobseeker.find({ isDeleted: { $ne: true }, status: { $ne: 'blacklist' } })
       .sort({ createDate: -1 })
-      .populate('userId', 'email')
+      .populate('userId', 'email lastLogin')
       .populate('qualification', 'name')
       .populate('industryType', 'industryType name industryName')
       .populate('jobCategory', 'categoryName')
@@ -814,56 +863,142 @@ exports.getEmployerCandidates = async (req, res) => {
       item.isUnlocked = isUnlocked;
       return item;
     });
-    const rawSearch = String(query.search || '').trim().toLowerCase();
-    const employmentTypes = splitList(query.employmentTypes);
+
+    // 8 Filters extracted from query
+    const rawSearch = String(query.search || query.keyword || query.q || '').trim().toLowerCase();
+    const jobTitleQuery = String(query.jobTitle || '').trim().toLowerCase();
     const selectedSkills = splitList(query.skills || query.skill);
+    const minExp = nullableNumber(query.minExp ?? query.minExperience);
+    const maxExp = nullableNumber(query.maxExp ?? query.maxExperience);
+    const locationQuery = String(query.location || '').trim().toLowerCase();
     const minSalary = nullableNumber(query.minSalary);
     const maxSalary = nullableNumber(query.maxSalary);
+    const genderQuery = String(query.gender || '').trim().toLowerCase();
+    const qualificationQuery = String(query.qualification || '').trim().toLowerCase();
+    const departmentQuery = String(query.department || query.industry || query.role || '').trim().toLowerCase();
+    const activityQuery = String(query.activity || query.activityWithin || '').trim().toLowerCase();
+    const employmentTypes = splitList(query.employmentTypes);
 
     mapped = mapped.filter((candidate) => {
-      const searchable = [
-        candidate.name,
-        candidate.email,
-        candidate.phone,
-        candidate.location,
-        candidate.role,
-        candidate.experience,
-        candidate.qualification,
-        candidate.expectedSalary,
-        candidate.industry,
-        candidate.gender,
-        candidate.employmentType,
-        (candidate.skills || []).join(' ')
-      ].join(' ').toLowerCase();
+      // 1. Job Title & Job Skills Filter
+      let matchesSearch = true;
+      if (rawSearch) {
+        const titleAndSkills = [
+          candidate.name,
+          candidate.designation,
+          candidate.role,
+          ...(candidate.experiences || []).map(e => e.position),
+          ...(candidate.skills || [])
+        ].join(' ').toLowerCase();
 
-      const matchesSearch = !rawSearch || searchable.includes(rawSearch);
-      const matchesRole = !query.role || candidate.role === query.role;
-      const matchesLocation = !query.location || candidate.location.toLowerCase().includes(String(query.location).toLowerCase());
-      const matchesExperience = !query.experience || candidate.experience === query.experience;
-      const matchesQualification = !query.qualification || candidate.qualification === query.qualification;
-      const matchesMinSalary = minSalary === null || (candidate.salaryMax !== null && candidate.salaryMax >= minSalary);
-      const matchesMaxSalary = maxSalary === null || (candidate.salaryMin !== null && candidate.salaryMin <= maxSalary);
-      const matchesNotice = !query.notice || candidate.availability === query.notice;
+        const broaderSearch = [
+          titleAndSkills,
+          candidate.location,
+          candidate.qualification,
+          candidate.industry
+        ].join(' ').toLowerCase();
+
+        matchesSearch = broaderSearch.includes(rawSearch);
+      }
+
+      let matchesTitle = true;
+      if (jobTitleQuery) {
+        const titleHaystack = [
+          candidate.designation,
+          candidate.role,
+          ...(candidate.experiences || []).map(e => e.position)
+        ].join(' ').toLowerCase();
+        matchesTitle = titleHaystack.includes(jobTitleQuery);
+      }
+
+      let matchesSkills = true;
+      if (selectedSkills.length > 0) {
+        const candidateSkills = (candidate.skills || []).map(s => String(s).trim().toLowerCase());
+        matchesSkills = selectedSkills.every(reqSkill => {
+          const reqLower = reqSkill.toLowerCase().trim();
+          return candidateSkills.some(cSkill => {
+            if (cSkill === reqLower) return true;
+            const cleanC = cSkill.replace(/\.js$/i, '').trim();
+            const cleanReq = reqLower.replace(/\.js$/i, '').trim();
+            return cleanC.includes(cleanReq) || cleanReq.includes(cleanC);
+          });
+        });
+      }
+
+      // 2. Experience: Minimum and Maximum
+      let matchesExp = true;
+      const cExp = candidate.experienceValue ?? 0;
+      if (minExp !== null && minExp >= 0) {
+        matchesExp = cExp >= minExp;
+      }
+      if (matchesExp && maxExp !== null && maxExp >= 0) {
+        matchesExp = cExp <= maxExp;
+      }
+      if (matchesExp && query.experience && minExp === null && maxExp === null) {
+        matchesExp = candidate.experience.toLowerCase().includes(String(query.experience).toLowerCase());
+      }
+
+      // 3. Location: Candidate's Current Location
+      let matchesLocation = true;
+      if (locationQuery) {
+        const locHaystack = [candidate.location, candidate.city, candidate.state, candidate.district].filter(Boolean).join(' ').toLowerCase();
+        matchesLocation = locHaystack.includes(locationQuery);
+      }
+
+      // 4. Salary: Minimum and Maximum
+      let matchesSalary = true;
+      if (minSalary !== null && minSalary > 0) {
+        matchesSalary = candidate.salaryMax === null || candidate.salaryMax >= minSalary;
+      }
+      if (matchesSalary && maxSalary !== null && maxSalary > 0) {
+        matchesSalary = candidate.salaryMin === null || candidate.salaryMin <= maxSalary;
+      }
+
+      // 5. Gender: Male, Female, Any
+      let matchesGender = true;
+      if (genderQuery && genderQuery !== 'any' && genderQuery !== 'all') {
+        matchesGender = String(candidate.gender || '').toLowerCase() === genderQuery;
+      }
+
+      // 6. Qualification: B.Pharm, M.Pharm, B.Sc., MBA, etc.
+      let matchesQual = true;
+      if (qualificationQuery && qualificationQuery !== 'all' && qualificationQuery !== 'all qualifications') {
+        const qualHaystack = [candidate.qualification, candidate.studyField].filter(Boolean).join(' ').toLowerCase();
+        matchesQual = qualHaystack.includes(qualificationQuery);
+      }
+
+      // 7. Department / Industry: QA, QC, Production, HR, Pharma, etc.
+      let matchesDept = true;
+      if (departmentQuery && departmentQuery !== 'all' && departmentQuery !== 'all industries' && departmentQuery !== 'all departments') {
+        const deptHaystack = [candidate.industry, candidate.role, candidate.designation].filter(Boolean).join(' ').toLowerCase();
+        matchesDept = deptHaystack.includes(departmentQuery);
+      }
+
+      // 8. Candidate Activity: Active within 3 months, 6 months, or All Candidates
+      let matchesActivity = true;
+      if (activityQuery && activityQuery !== 'all' && activityQuery !== 'all candidates') {
+        const actTime = candidate.activityDate;
+        if (!actTime) {
+          matchesActivity = false;
+        } else {
+          const now = Date.now();
+          if (activityQuery === '3months' || activityQuery === '3 months' || activityQuery === '90days') {
+            matchesActivity = (now - actTime) <= 90 * 24 * 60 * 60 * 1000;
+          } else if (activityQuery === '6months' || activityQuery === '6 months' || activityQuery === '180days') {
+            matchesActivity = (now - actTime) <= 180 * 24 * 60 * 60 * 1000;
+          } else if (activityQuery === '1month' || activityQuery === '1 month' || activityQuery === '30days') {
+            matchesActivity = (now - actTime) <= 30 * 24 * 60 * 60 * 1000;
+          }
+        }
+      }
+
+      // Optional notice or employment type if present
       const matchesEmployment = !employmentTypes.length || employmentTypes.includes(candidate.employmentType);
-      const matchesIndustry = !query.industry || candidate.industry === query.industry;
-      const matchesGender = !query.gender || candidate.gender === query.gender;
       const matchesCompany = !query.company || candidate.company.toLowerCase().includes(String(query.company).toLowerCase());
 
-      // AND Logic for Skills: Candidate must have ALL selected skills
-      const candidateSkills = (candidate.skills || []).map(s => String(s).trim().toLowerCase());
-      const matchesSkills = !selectedSkills.length || selectedSkills.every(reqSkill => {
-        const reqLower = reqSkill.toLowerCase().trim();
-        return candidateSkills.some(cSkill => {
-          if (cSkill === reqLower) return true;
-          const cleanC = cSkill.replace(/\.js$/i, '').trim();
-          const cleanReq = reqLower.replace(/\.js$/i, '').trim();
-          return cleanC === cleanReq;
-        });
-      });
-
-      return matchesSearch && matchesRole && matchesLocation && matchesExperience && matchesQualification
-        && matchesMinSalary && matchesMaxSalary && matchesNotice && matchesEmployment && matchesIndustry && matchesGender && matchesCompany
-        && matchesSkills;
+      return matchesSearch && matchesTitle && matchesSkills && matchesExp && matchesLocation
+        && matchesSalary && matchesGender && matchesQual && matchesDept && matchesActivity
+        && matchesEmployment && matchesCompany;
     });
 
     switch (query.sortBy) {
@@ -877,6 +1012,7 @@ exports.getEmployerCandidates = async (req, res) => {
         mapped.sort((a, b) => (a.salaryMin || 0) - (b.salaryMin || 0));
         break;
       case 'Newest First':
+        mapped.sort((a, b) => (b.activityDate || 0) - (a.activityDate || 0));
         break;
       case 'Experience (High to Low)':
       default:
@@ -886,10 +1022,28 @@ exports.getEmployerCandidates = async (req, res) => {
 
     const { items, pagination } = paginate(mapped, query.page, query.limit);
 
-    const dbSkills = await Skill.find({ status: 'active' }).sort({ usageCount: -1, name: 1 }).select('name').lean();
+    const [dbSkills, dbQualifications, dbIndustries] = await Promise.all([
+      Skill.find({ status: 'active' }).sort({ usageCount: -1, name: 1 }).select('name').lean().catch(() => []),
+      Qualification.find({ status: 'active' }).sort({ sortingNo: 1, name: 1 }).select('name').lean().catch(() => []),
+      IndustryType.find({ status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).select('industryType').lean().catch(() => [])
+    ]);
+
     const allSkillNames = dbSkills.length
       ? dbSkills.map(s => s.name)
       : [...new Set(candidates.flatMap(item => item.skills || []).filter(Boolean))];
+
+    const allQualifications = [...new Set([
+      'B.Pharm', 'M.Pharm', 'B.Sc.', 'M.Sc.', 'B.Tech', 'M.Tech', 'MBA', 'B.Com', 'Diploma', 'Ph.D', '12th Pass',
+      ...candidates.map(item => item.qualification?.name).filter(Boolean),
+      ...dbQualifications.map(q => q.name).filter(Boolean)
+    ])];
+
+    const allIndustries = [...new Set([
+      'QA (Quality Assurance)', 'QC (Quality Control)', 'Production', 'Regulatory Affairs (RA)', 'R&D / Formulation', 'Packaging', 'HR & Admin', 'Sales & Marketing', 'Pharmaceutical', 'Biotechnology', 'Healthcare',
+      ...candidates.map(item => item.industryType?.industryType || item.industryType?.name || item.industryType?.industryName).filter(Boolean),
+      ...dbIndustries.map(i => i.industryType).filter(Boolean),
+      ...candidates.map(item => item.jobCategory?.categoryName).filter(Boolean)
+    ])];
 
     res.json({
       stats: {
@@ -903,8 +1057,9 @@ exports.getEmployerCandidates = async (req, res) => {
         roles: [...new Set(candidates.map(item => item.jobCategory?.categoryName).filter(Boolean))],
         locations: [...new Set(candidates.map(item => [item.city, item.state].filter(Boolean).join(', ')).filter(Boolean))],
         experiences: [...new Set(candidates.map(item => item.experience).filter(Boolean))],
-        qualifications: [...new Set(candidates.map(item => item.qualification?.name).filter(Boolean))],
-        industries: [...new Set(candidates.map(item => item.industryType?.industryType || item.industryType?.name || item.industryType?.industryName).filter(Boolean))],
+        qualifications: allQualifications,
+        industries: allIndustries,
+        departments: allIndustries,
         employmentTypes: [...new Set(candidates.map(item => item.jobType?.jobType).filter(Boolean))],
         skills: allSkillNames
       },
