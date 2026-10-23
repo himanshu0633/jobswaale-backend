@@ -1020,7 +1020,9 @@ exports.getEmployerCandidates = async (req, res) => {
       let matchesQual = true;
       if (qualificationQuery && qualificationQuery !== 'all' && qualificationQuery !== 'all qualifications') {
         const qualHaystack = [candidate.qualification, candidate.studyField].filter(Boolean).join(' ').toLowerCase();
-        matchesQual = qualHaystack.includes(qualificationQuery);
+        const normHaystack = qualHaystack.replace(/[^\w\s]/g, '').replace(/\s+/g, ' ');
+        const normQuery = qualificationQuery.replace(/[^\w\s]/g, '').replace(/\s+/g, ' ');
+        matchesQual = qualHaystack.includes(qualificationQuery) || (normQuery && normHaystack.includes(normQuery));
       }
 
       // 7. Industry Type: Pharmaceutical, Biotechnology, Healthcare, Chemical, etc.
@@ -1094,7 +1096,7 @@ exports.getEmployerCandidates = async (req, res) => {
 
     const [dbSkills, dbQualifications, dbIndustries, dbJobCategories] = await Promise.all([
       Skill.find({ status: 'active' }).sort({ usageCount: -1, name: 1 }).select('name').lean().catch(() => []),
-      Qualification.find({ status: 'active' }).sort({ sortingNo: 1, name: 1 }).select('name').lean().catch(() => []),
+      Qualification.find({ isDeleted: { $ne: true }, status: { $ne: 'inactive' } }).sort({ sortingNo: 1, name: 1 }).select('name').lean().catch(() => []),
       IndustryType.find({ status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).select('industryType name industryName').lean().catch(() => []),
       JobCategory.find({ status: 'active' }).sort({ sortingNo: 1, categoryName: 1 }).select('categoryName name').lean().catch(() => [])
     ]);
@@ -1104,9 +1106,9 @@ exports.getEmployerCandidates = async (req, res) => {
       : [...new Set(candidates.flatMap(item => item.skills || []).filter(Boolean))];
 
     const allQualifications = [...new Set([
-      'B.Pharm', 'M.Pharm', 'B.Sc.', 'M.Sc.', 'B.Tech', 'M.Tech', 'MBA', 'B.Com', 'Diploma', 'Ph.D', '12th Pass',
+      ...dbQualifications.map(q => q.name).filter(Boolean),
       ...candidates.map(item => item.qualification?.name).filter(Boolean),
-      ...dbQualifications.map(q => q.name).filter(Boolean)
+      'B.Pharm', 'M.Pharm', 'B.Sc.', 'M.Sc.', 'B.Tech', 'M.Tech', 'MBA', 'B.Com', 'Diploma', 'Ph.D', '12th Pass'
     ])];
 
     const standardIndustries = [

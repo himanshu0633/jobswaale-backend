@@ -43,7 +43,7 @@ exports.getQualifications = async (req, res) => {
       const list = await Qualification.find(activeFilter(req))
         .populate('login', 'email')
         .populate('updatedLogin', 'email')
-        .sort({ name: 1, id: 1 });
+        .sort({ sortingNo: 1, name: 1, id: 1 });
       res.json(list);
     }
   } catch (error) {
