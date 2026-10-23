@@ -662,7 +662,8 @@ const mapCandidate = (candidate, index = 0, showContacts = true, allowDownload =
     hasResume: Boolean(candidate.resume),
     allowResumeDownload: allowDownload,
     activityDate,
-    lastActive: lastActiveText
+    lastActive: lastActiveText,
+    jobSearchStatus: candidate.jobSearchStatus || 'looking'
   };
 };
 
@@ -869,7 +870,7 @@ exports.getEmployerCandidates = async (req, res) => {
       return item;
     });
 
-    // 8 Filters extracted from query
+    // Candidate Search Filters extracted from query
     const rawSearch = String(query.search || query.keyword || query.q || '').trim().toLowerCase();
     const jobTitleQuery = String(query.jobTitle || '').trim().toLowerCase();
     const selectedSkills = splitList(query.skills || query.skill);
@@ -886,6 +887,7 @@ exports.getEmployerCandidates = async (req, res) => {
     const industryQuery = String(query.industryType || query.industry || '').trim().toLowerCase();
     const jobCategoryQuery = String(query.jobCategory || query.category || query.department || query.role || '').trim().toLowerCase();
     const activityQuery = String(query.activity || query.activityWithin || '').trim().toLowerCase();
+    const jobSearchStatusQuery = String(query.jobSearchStatus || query.status || '').trim().toLowerCase();
     const employmentTypes = splitList(query.employmentTypes);
 
     mapped = mapped.filter((candidate) => {
@@ -978,15 +980,21 @@ exports.getEmployerCandidates = async (req, res) => {
 
         if (includeRelocate && isWillingToRelocate) {
           const prefStr = String(candidate.preferredLocation || '').trim().toLowerCase();
-          const prefItems = prefStr.split(',').map(s => s.trim()).filter(Boolean);
-          const mentionsAnywhere = prefStr.includes('anywhere');
-
-          if (excludeAnywhere && mentionsAnywhere) {
-            matchesPreferred = false;
-          } else {
-            matchesPreferred = selectedLocations.some(loc => {
-              return prefItems.some(item => item === loc || item.includes(loc) || loc.includes(item)) || prefStr.includes(loc);
-            });
+          if (prefStr) {
+            const mentionsAnywhere = prefStr.includes('anywhere');
+            if (mentionsAnywhere && excludeAnywhere) {
+              // Exclude candidates who have mentioned Anywhere in their location preference
+              matchesPreferred = false;
+            } else if (mentionsAnywhere && !excludeAnywhere) {
+              // Willing to relocate anywhere matches any location search
+              matchesPreferred = true;
+            } else {
+              // Specific preferred locations
+              const prefItems = prefStr.split(',').map(s => s.trim()).filter(Boolean);
+              matchesPreferred = selectedLocations.some(loc => {
+                return prefItems.some(item => item === loc || item.includes(loc) || loc.includes(item)) || prefStr.includes(loc);
+              });
+            }
           }
         }
 
@@ -1047,12 +1055,19 @@ exports.getEmployerCandidates = async (req, res) => {
         }
       }
 
+      // 10. Job Search Status: Looking for Job ('looking'), Not Looking ('not-looking'), or All Statuses ('')
+      let matchesJobSearchStatus = true;
+      if (jobSearchStatusQuery && jobSearchStatusQuery !== 'all' && jobSearchStatusQuery !== 'all statuses') {
+        matchesJobSearchStatus = String(candidate.jobSearchStatus || 'looking').toLowerCase() === jobSearchStatusQuery;
+      }
+
       // Optional notice or employment type if present
       const matchesEmployment = !employmentTypes.length || employmentTypes.includes(candidate.employmentType);
       const matchesCompany = !query.company || candidate.company.toLowerCase().includes(String(query.company).toLowerCase());
 
       return matchesSearch && matchesTitle && matchesSkills && matchesExp && matchesLocation
         && matchesSalary && matchesGender && matchesQual && matchesIndustry && matchesJobCategory && matchesActivity
+        && matchesJobSearchStatus
         && matchesEmployment && matchesCompany;
     });
 
