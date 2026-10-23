@@ -1010,9 +1010,9 @@ exports.getEmployerCandidates = async (req, res) => {
         matchesSalary = candidate.salaryMin === null || candidate.salaryMin <= maxSalary;
       }
 
-      // 5. Gender: Male, Female, Any
+      // 5. Gender: Male, Female, Other
       let matchesGender = true;
-      if (genderQuery && genderQuery !== 'any' && genderQuery !== 'all') {
+      if (genderQuery && genderQuery !== 'any' && genderQuery !== 'all' && genderQuery !== 'select gender') {
         matchesGender = String(candidate.gender || '').toLowerCase() === genderQuery;
       }
 
