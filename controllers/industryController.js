@@ -6,6 +6,13 @@ exports.getIndustryTypes = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate, status, isRequested, includeRequested } = req.query;
 
+    // Permanently remove any legacy / accidental 'Other' entries from database
+    try {
+      await IndustryType.deleteMany({ industryType: { $regex: /^other$/i } });
+    } catch (e) {
+      console.warn('Cleanup legacy Other industry type error:', e.message);
+    }
+
     if (paginate === 'true' || page !== undefined) {
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 10;
@@ -13,6 +20,7 @@ exports.getIndustryTypes = async (req, res) => {
 
       // Build search filter on ID and Name
       const filter = activeFilter(req);
+      filter.industryType = { $not: /^other$/i };
       if (status) {
         filter.status = status;
       } else if (includeRequested !== 'true') {
@@ -52,6 +60,7 @@ exports.getIndustryTypes = async (req, res) => {
       });
     } else {
       const filter = activeFilter(req);
+      filter.industryType = { $not: /^other$/i };
       if (status) {
         filter.status = status;
       } else if (includeRequested !== 'true') {
@@ -95,6 +104,9 @@ exports.requestIndustryType = async (req, res) => {
       return res.status(400).json({ message: 'Industry type name is required' });
     }
     const cleanName = rawName.trim();
+    if (cleanName.toLowerCase() === 'other') {
+      return res.status(400).json({ message: 'Please enter a specific industry name.' });
+    }
 
     // Check if an industry type already exists with this name (case-insensitive)
     const existing = await IndustryType.findOne(
@@ -211,6 +223,9 @@ exports.createIndustryType = async (req, res) => {
     }
 
     const cleanIndustryType = industryType.trim();
+    if (cleanIndustryType.toLowerCase() === 'other') {
+      return res.status(400).json({ message: 'Industry type cannot be "Other"' });
+    }
 
     const exists = await IndustryType.findOne({ id, isDeleted: { $ne: true } });
     if (exists) {

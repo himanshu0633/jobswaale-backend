@@ -269,7 +269,7 @@ exports.createJob = async (req, res) => {
 
     let resolvedCategoryId = jobCategory;
     const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
-    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory && rawCustomCategory.toLowerCase() !== 'other') {
       let matched = await JobCategory.findOne({
         categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
         isDeleted: { $ne: true }
@@ -480,7 +480,7 @@ exports.updateJob = async (req, res) => {
 
     let resolvedCategoryId = jobCategory;
     const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
-    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory && rawCustomCategory.toLowerCase() !== 'other') {
       let matched = await JobCategory.findOne({
         categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
         isDeleted: { $ne: true }

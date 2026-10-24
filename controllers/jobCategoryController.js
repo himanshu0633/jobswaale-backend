@@ -6,12 +6,20 @@ exports.getJobCategories = async (req, res) => {
   try {
     const { page, limit = 10, search = '', paginate, status, isRequested, includeRequested } = req.query;
 
+    // Permanently remove any legacy / accidental 'Other' entries from database
+    try {
+      await JobCategory.deleteMany({ categoryName: { $regex: /^other$/i } });
+    } catch (e) {
+      console.warn('Cleanup legacy Other job category error:', e.message);
+    }
+
     if (paginate === 'true' || page !== undefined) {
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 10;
       const skip = (pageNum - 1) * limitNum;
 
       const filter = activeFilter(req);
+      filter.categoryName = { $not: /^other$/i };
       if (status) {
         filter.status = status;
       } else if (includeRequested !== 'true') {
@@ -51,6 +59,7 @@ exports.getJobCategories = async (req, res) => {
       });
     } else {
       const filter = activeFilter(req);
+      filter.categoryName = { $not: /^other$/i };
       if (status) {
         filter.status = status;
       } else if (includeRequested !== 'true') {
@@ -94,6 +103,9 @@ exports.requestJobCategory = async (req, res) => {
       return res.status(400).json({ message: 'Job category name is required' });
     }
     const cleanName = rawName.trim();
+    if (cleanName.toLowerCase() === 'other') {
+      return res.status(400).json({ message: 'Please enter a specific job category name.' });
+    }
 
     // Check if category already exists with this name (case-insensitive)
     const existing = await JobCategory.findOne(
@@ -210,6 +222,9 @@ exports.createJobCategory = async (req, res) => {
     }
 
     const cleanCategoryName = categoryName.trim();
+    if (cleanCategoryName.toLowerCase() === 'other') {
+      return res.status(400).json({ message: 'Job category cannot be "Other"' });
+    }
 
     const exists = await JobCategory.findOne({ id, isDeleted: { $ne: true } });
     if (exists) {

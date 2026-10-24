@@ -1097,8 +1097,8 @@ exports.getEmployerCandidates = async (req, res) => {
     const [dbSkills, dbQualifications, dbIndustries, dbJobCategories] = await Promise.all([
       Skill.find({ status: 'active' }).sort({ usageCount: -1, name: 1 }).select('name').lean().catch(() => []),
       Qualification.find({ isDeleted: { $ne: true }, status: { $ne: 'inactive' } }).sort({ sortingNo: 1, name: 1 }).select('name').lean().catch(() => []),
-      IndustryType.find({ status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).select('industryType name industryName').lean().catch(() => []),
-      JobCategory.find({ status: 'active' }).sort({ sortingNo: 1, categoryName: 1 }).select('categoryName name').lean().catch(() => [])
+      IndustryType.find({ status: 'active', industryType: { $not: /^other$/i } }).sort({ sortingNo: 1, industryType: 1 }).select('industryType name industryName').lean().catch(() => []),
+      JobCategory.find({ status: 'active', categoryName: { $not: /^other$/i } }).sort({ sortingNo: 1, categoryName: 1 }).select('categoryName name').lean().catch(() => [])
     ]);
 
     const allSkillNames = dbSkills.length
@@ -3120,8 +3120,13 @@ exports.getEmployerProfile = async (req, res) => {
       daysRemaining = Math.max(Math.ceil(diffMs / (1000 * 60 * 60 * 24)), 0);
     }
 
+    try {
+      await IndustryType.deleteMany({ industryType: { $regex: /^other$/i } });
+      await JobCategory.deleteMany({ categoryName: { $regex: /^other$/i } });
+    } catch (_) {}
+
     const [industries, states, districts, cities, countries] = await Promise.all([
-      IndustryType.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, industryType: 1 }).lean(),
+      IndustryType.find({ isDeleted: { $ne: true }, status: 'active', industryType: { $not: /^other$/i } }).sort({ sortingNo: 1, industryType: 1 }).lean(),
       State.find({ isDeleted: { $ne: true }, status: 'active' }).lean(),
       District.find({ isDeleted: { $ne: true }, status: 'active' }).lean(),
       City.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ cityName: 1 }).lean(),
@@ -3274,7 +3279,7 @@ exports.updateEmployerProfile = async (req, res) => {
 
     let resolvedIndustryId = industryType;
     const rawCustomIndustry = (req.body.customIndustryType || req.body.customIndustry || '').trim();
-    if ((industryType === '__other__' || !industryType) && rawCustomIndustry) {
+    if ((industryType === '__other__' || !industryType) && rawCustomIndustry && rawCustomIndustry.toLowerCase() !== 'other') {
       let matched = await IndustryType.findOne({
         industryType: { $regex: `^${rawCustomIndustry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
         isDeleted: { $ne: true }
@@ -3629,7 +3634,7 @@ exports.getEmployerJobForm = async (req, res) => {
     const userId = req.user._id;
     const [employer, categories, jobTypes, qualifications, cities, states, districts, countries] = await Promise.all([
       Employer.findOne({ $or: [{ userId }, { login: userId }], isDeleted: { $ne: true } }).populate('currentPlan'),
-      JobCategory.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, categoryName: 1 }).lean(),
+      JobCategory.find({ isDeleted: { $ne: true }, status: 'active', categoryName: { $not: /^other$/i } }).sort({ sortingNo: 1, categoryName: 1 }).lean(),
       JobType.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, jobType: 1 }).lean(),
       Qualification.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, name: 1 }).lean(),
       City.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ cityName: 1, ctid: 1 }).lean(),
@@ -3702,7 +3707,7 @@ exports.getEmployerAutoMailSettings = async (req, res) => {
     const employer = await Employer.findOne({ $or: [{ userId }, { login: userId }], isDeleted: { $ne: true } }).populate('currentPlan').lean();
     if (!employer) return res.status(404).json({ message: 'Employer profile was not found.' });
     const summary = await getEmployerAutoMailSummary({ employer, plan: employer.currentPlan });
-    const categories = await JobCategory.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ sortingNo: 1, categoryName: 1 }).lean();
+    const categories = await JobCategory.find({ isDeleted: { $ne: true }, status: 'active', categoryName: { $not: /^other$/i } }).sort({ sortingNo: 1, categoryName: 1 }).lean();
     const locations = await City.find({ isDeleted: { $ne: true }, status: 'active' }).sort({ cityName: 1 }).limit(500).lean();
     res.json({
       settings: summary,
@@ -3811,7 +3816,7 @@ exports.updateEmployerJob = async (req, res) => {
 
     let resolvedCategoryId = jobCategory;
     const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
-    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory && rawCustomCategory.toLowerCase() !== 'other') {
       let matched = await JobCategory.findOne({
         categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
         isDeleted: { $ne: true }
@@ -4270,7 +4275,7 @@ exports.createEmployerJob = async (req, res) => {
 
     let resolvedCategoryId = jobCategory;
     const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
-    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory && rawCustomCategory.toLowerCase() !== 'other') {
       let matched = await JobCategory.findOne({
         categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
         isDeleted: { $ne: true }
