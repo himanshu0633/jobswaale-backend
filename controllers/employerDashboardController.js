@@ -3271,7 +3271,31 @@ exports.updateEmployerProfile = async (req, res) => {
       employer.phone = phone;
       await User.findByIdAndUpdate(userId, { phone });
     }
-    if (industryType !== undefined) employer.industryType = industryType || null;
+
+    let resolvedIndustryId = industryType;
+    const rawCustomIndustry = (req.body.customIndustryType || req.body.customIndustry || '').trim();
+    if ((industryType === '__other__' || !industryType) && rawCustomIndustry) {
+      let matched = await IndustryType.findOne({
+        industryType: { $regex: `^${rawCustomIndustry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await IndustryType.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          industryType: rawCustomIndustry,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: employer?.companyName || user.companyName || user.email || 'Employer',
+          requestedRole: 'Employer',
+          login: userId
+        });
+      }
+      resolvedIndustryId = matched._id;
+    }
+
+    if (resolvedIndustryId !== undefined) {
+      employer.industryType = (resolvedIndustryId && resolvedIndustryId !== '__other__') ? resolvedIndustryId : null;
+    }
     if (website !== undefined) employer.website = website;
     if (description !== undefined) employer.description = description;
     if (country !== undefined) employer.country = country;
@@ -3785,7 +3809,28 @@ exports.updateEmployerJob = async (req, res) => {
       status
     } = req.body;
 
-    if (!jobTitle || !jobCategory || !jobType || !vacancies || !(description || detailedDescription || jobSummary) || !(experience || requiredExperience)) {
+    let resolvedCategoryId = jobCategory;
+    const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+      let matched = await JobCategory.findOne({
+        categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await JobCategory.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          categoryName: rawCustomCategory,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: employer?.companyName || req.user.companyName || req.user.email || 'Employer',
+          requestedRole: 'Employer',
+          login: userId
+        });
+      }
+      resolvedCategoryId = matched._id;
+    }
+
+    if (!jobTitle || !resolvedCategoryId || resolvedCategoryId === '__other__' || !jobType || !vacancies || !(description || detailedDescription || jobSummary) || !(experience || requiredExperience)) {
       return res.status(400).json({ message: 'Please fill all required job details.' });
     }
 
@@ -3823,7 +3868,7 @@ exports.updateEmployerJob = async (req, res) => {
 
     const proposedData = {
       jobTitle,
-      jobCategory,
+      jobCategory: resolvedCategoryId,
       jobType,
       vacancies: Number(vacancies) || 1,
       workMode: workMode || 'Office',
@@ -4223,7 +4268,28 @@ exports.createEmployerJob = async (req, res) => {
       status
     } = req.body;
 
-    if (!jobTitle || !jobCategory || !jobType || !vacancies || !(description || detailedDescription || jobSummary) || !(experience || requiredExperience)) {
+    let resolvedCategoryId = jobCategory;
+    const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+      let matched = await JobCategory.findOne({
+        categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await JobCategory.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          categoryName: rawCustomCategory,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: employer?.companyName || req.user.companyName || req.user.email || 'Employer',
+          requestedRole: 'Employer',
+          login: userId
+        });
+      }
+      resolvedCategoryId = matched._id;
+    }
+
+    if (!jobTitle || !resolvedCategoryId || resolvedCategoryId === '__other__' || !jobType || !vacancies || !(description || detailedDescription || jobSummary) || !(experience || requiredExperience)) {
       return res.status(400).json({ message: 'Please fill all required job details.' });
     }
 
@@ -4261,7 +4327,7 @@ exports.createEmployerJob = async (req, res) => {
 
     const job = await Job.create({
       jobTitle,
-      jobCategory,
+      jobCategory: resolvedCategoryId,
       jobType,
       vacancies: Number(vacancies) || 1,
       workMode: workMode || 'Onsite',

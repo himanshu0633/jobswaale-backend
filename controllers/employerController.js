@@ -1,6 +1,7 @@
 const Employer = require('../models/Employer');
 const User = require('../models/User');
 const Job = require('../models/Job');
+const IndustryType = require('../models/IndustryType');
 const mongoose = require('mongoose');
 const { validateMobileNumber, findDuplicateMobile, validateEmailAddress, findDuplicateEmail } = require('../utils/userCredentials');
 const { getSettings } = require('../utils/settings');
@@ -368,7 +369,28 @@ exports.createEmployer = async (req, res) => {
       logo 
     } = req.body;
 
-    if (!email || !password || !companyName || !phone || !industryType) {
+    let resolvedIndustryId = industryType;
+    const rawCustomIndustry = (req.body.customIndustryType || req.body.customIndustry || '').trim();
+    if ((industryType === '__other__' || !industryType) && rawCustomIndustry) {
+      let matched = await IndustryType.findOne({
+        industryType: { $regex: `^${rawCustomIndustry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await IndustryType.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          industryType: rawCustomIndustry,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: companyName || req.user?.email || 'Admin',
+          requestedRole: req.user?.role || 'Admin',
+          login: req.user?._id
+        });
+      }
+      resolvedIndustryId = matched._id;
+    }
+
+    if (!email || !password || !companyName || !phone || !resolvedIndustryId || resolvedIndustryId === '__other__') {
       return res.status(400).json({ message: 'Email, password, companyName, phone, and industryType are required' });
     }
 
@@ -405,7 +427,7 @@ exports.createEmployer = async (req, res) => {
       companyName,
       contactPerson,
       phone: normalizedPhone,
-      industryType,
+      industryType: resolvedIndustryId,
       website,
       description,
       country,
@@ -490,13 +512,34 @@ exports.updateEmployer = async (req, res) => {
       phone: normalizedPhone
     });
 
+    let resolvedIndustryId = industryType;
+    const rawCustomIndustry = (req.body.customIndustryType || req.body.customIndustry || '').trim();
+    if ((industryType === '__other__' || !industryType) && rawCustomIndustry) {
+      let matched = await IndustryType.findOne({
+        industryType: { $regex: `^${rawCustomIndustry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await IndustryType.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          industryType: rawCustomIndustry,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: companyName || req.user?.email || 'Admin',
+          requestedRole: req.user?.role || 'Admin',
+          login: req.user?._id
+        });
+      }
+      resolvedIndustryId = matched._id;
+    }
+
     const updated = await Employer.findByIdAndUpdate(
       id,
       {
         companyName,
         contactPerson,
         phone: normalizedPhone,
-        industryType,
+        industryType: (resolvedIndustryId && resolvedIndustryId !== '__other__') ? resolvedIndustryId : employer.industryType,
         website,
         description,
         country,

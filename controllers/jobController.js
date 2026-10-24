@@ -1,5 +1,6 @@
 const Job = require('../models/Job');
 const Employer = require('../models/Employer');
+const JobCategory = require('../models/JobCategory');
 const mongoose = require('mongoose');
 const fs = require('fs');
 const path = require('path');
@@ -266,7 +267,28 @@ exports.createJob = async (req, res) => {
       blacklistReason 
     } = req.body;
 
-    if (!jobTitle || !jobCategory || !jobType || !vacancies || !description || !(experience || requiredExperience) || !companyName || !email || !phone) {
+    let resolvedCategoryId = jobCategory;
+    const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+      let matched = await JobCategory.findOne({
+        categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await JobCategory.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          categoryName: rawCustomCategory,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: companyName || req.user?.companyName || req.user?.email || 'Admin',
+          requestedRole: req.user?.role || 'Admin',
+          login: req.user?._id
+        });
+      }
+      resolvedCategoryId = matched._id;
+    }
+
+    if (!jobTitle || !resolvedCategoryId || resolvedCategoryId === '__other__' || !jobType || !vacancies || !description || !(experience || requiredExperience) || !companyName || !email || !phone) {
       return res.status(400).json({ message: 'jobTitle, jobCategory, jobType, vacancies, description, experience, companyName, email, and phone are required' });
     }
 
@@ -296,7 +318,7 @@ exports.createJob = async (req, res) => {
 
     const job = new Job({
       jobTitle,
-      jobCategory,
+      jobCategory: resolvedCategoryId,
       jobType,
       vacancies,
       workMode,
@@ -456,11 +478,32 @@ exports.updateJob = async (req, res) => {
       }
     }
 
+    let resolvedCategoryId = jobCategory;
+    const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+      let matched = await JobCategory.findOne({
+        categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await JobCategory.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          categoryName: rawCustomCategory,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: companyName || req.user?.companyName || req.user?.email || 'Admin',
+          requestedRole: req.user?.role || 'Admin',
+          login: req.user?._id
+        });
+      }
+      resolvedCategoryId = matched._id;
+    }
+
     const updated = await Job.findByIdAndUpdate(
       id,
       {
         jobTitle: jobTitle !== undefined ? jobTitle : job.jobTitle,
-        jobCategory: jobCategory !== undefined ? jobCategory : job.jobCategory,
+        jobCategory: (resolvedCategoryId && resolvedCategoryId !== '__other__') ? resolvedCategoryId : job.jobCategory,
         jobType: jobType !== undefined ? jobType : job.jobType,
         vacancies: vacancies !== undefined ? vacancies : job.vacancies,
         workMode: workMode !== undefined ? workMode : job.workMode,

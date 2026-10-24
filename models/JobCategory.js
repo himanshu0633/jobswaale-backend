@@ -4,7 +4,7 @@ const JobCategorySchema = new mongoose.Schema({
   id: {
     type: String,
     unique: true,
-    required: true
+    sparse: true
   },
   categoryName: {
     type: String,
@@ -17,8 +17,20 @@ const JobCategorySchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'inactive'],
+    enum: ['active', 'inactive', 'pending'],
     default: 'active'
+  },
+  isRequested: {
+    type: Boolean,
+    default: false
+  },
+  requestedBy: {
+    type: String,
+    default: ''
+  },
+  requestedRole: {
+    type: String,
+    default: ''
   },
   ip: {
     type: String,
@@ -27,7 +39,7 @@ const JobCategorySchema = new mongoose.Schema({
   login: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false
   },
   updatedLogin: {
     type: mongoose.Schema.Types.ObjectId,

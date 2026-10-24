@@ -708,8 +708,53 @@ exports.updateJobseekerProfile = async (req, res) => {
       seeker.qualification = qualDoc._id;
     }
 
-    if (industryType !== undefined) seeker.industryType = mongoose.Types.ObjectId.isValid(industryType) ? industryType : null;
-    if (jobCategory !== undefined) seeker.jobCategory = mongoose.Types.ObjectId.isValid(jobCategory) ? jobCategory : null;
+    let resolvedIndustryId = industryType;
+    const rawCustomIndustry = (req.body.customIndustryType || req.body.customIndustry || '').trim();
+    if ((industryType === '__other__' || !industryType) && rawCustomIndustry) {
+      let matched = await IndustryType.findOne({
+        industryType: { $regex: `^${rawCustomIndustry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await IndustryType.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          industryType: rawCustomIndustry,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: seeker.name || req.user.email || 'Jobseeker',
+          requestedRole: 'Jobseeker',
+          login: userId
+        });
+      }
+      resolvedIndustryId = matched._id;
+    }
+    if (resolvedIndustryId !== undefined) {
+      seeker.industryType = mongoose.Types.ObjectId.isValid(resolvedIndustryId) ? resolvedIndustryId : null;
+    }
+
+    let resolvedCategoryId = jobCategory;
+    const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+      let matched = await JobCategory.findOne({
+        categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await JobCategory.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          categoryName: rawCustomCategory,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: seeker.name || req.user.email || 'Jobseeker',
+          requestedRole: 'Jobseeker',
+          login: userId
+        });
+      }
+      resolvedCategoryId = matched._id;
+    }
+    if (resolvedCategoryId !== undefined) {
+      seeker.jobCategory = mongoose.Types.ObjectId.isValid(resolvedCategoryId) ? resolvedCategoryId : null;
+    }
     if (jobType !== undefined) seeker.jobType = mongoose.Types.ObjectId.isValid(jobType) ? jobType : null;
 
     try {

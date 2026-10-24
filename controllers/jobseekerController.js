@@ -1,6 +1,8 @@
 const Jobseeker = require('../models/Jobseeker');
 const User = require('../models/User');
 const Application = require('../models/Application');
+const IndustryType = require('../models/IndustryType');
+const JobCategory = require('../models/JobCategory');
 const {
   findDuplicateEmail,
   findDuplicateMobile,
@@ -249,14 +251,56 @@ exports.createJobseeker = async (req, res) => {
       status: status === 'blacklist' ? 'inactive' : 'active'
     });
 
+    let resolvedIndustryId = industryType;
+    const rawCustomIndustry = (req.body.customIndustryType || req.body.customIndustry || '').trim();
+    if ((industryType === '__other__' || !industryType) && rawCustomIndustry) {
+      let matched = await IndustryType.findOne({
+        industryType: { $regex: `^${rawCustomIndustry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await IndustryType.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          industryType: rawCustomIndustry,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: name || req.user?.email || 'Admin',
+          requestedRole: req.user?.role || 'Admin',
+          login: req.user?._id
+        });
+      }
+      resolvedIndustryId = matched._id;
+    }
+
+    let resolvedCategoryId = jobCategory;
+    const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+      let matched = await JobCategory.findOne({
+        categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await JobCategory.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          categoryName: rawCustomCategory,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: name || req.user?.email || 'Admin',
+          requestedRole: req.user?.role || 'Admin',
+          login: req.user?._id
+        });
+      }
+      resolvedCategoryId = matched._id;
+    }
+
     const jobseeker = new Jobseeker({
       userId: user._id,
       name,
       phone: normalizedPhone,
       gender,
       qualification,
-      industryType: industryType || null,
-      jobCategory: jobCategory || null,
+      industryType: (resolvedIndustryId && resolvedIndustryId !== '__other__') ? resolvedIndustryId : null,
+      jobCategory: (resolvedCategoryId && resolvedCategoryId !== '__other__') ? resolvedCategoryId : null,
       jobType: jobType || null,
       experience,
       currentSalary,
@@ -355,6 +399,48 @@ exports.updateJobseeker = async (req, res) => {
       phone: normalizedPhone
     });
 
+    let resolvedIndustryId = industryType;
+    const rawCustomIndustry = (req.body.customIndustryType || req.body.customIndustry || '').trim();
+    if ((industryType === '__other__' || !industryType) && rawCustomIndustry) {
+      let matched = await IndustryType.findOne({
+        industryType: { $regex: `^${rawCustomIndustry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await IndustryType.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          industryType: rawCustomIndustry,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: name || req.user?.email || 'Admin',
+          requestedRole: req.user?.role || 'Admin',
+          login: req.user?._id
+        });
+      }
+      resolvedIndustryId = matched._id;
+    }
+
+    let resolvedCategoryId = jobCategory;
+    const rawCustomCategory = (req.body.customJobCategory || req.body.customCategory || '').trim();
+    if ((jobCategory === '__other__' || !jobCategory) && rawCustomCategory) {
+      let matched = await JobCategory.findOne({
+        categoryName: { $regex: `^${rawCustomCategory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+        isDeleted: { $ne: true }
+      });
+      if (!matched) {
+        matched = await JobCategory.create({
+          id: `REQ-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`,
+          categoryName: rawCustomCategory,
+          status: 'pending',
+          isRequested: true,
+          requestedBy: name || req.user?.email || 'Admin',
+          requestedRole: req.user?.role || 'Admin',
+          login: req.user?._id
+        });
+      }
+      resolvedCategoryId = matched._id;
+    }
+
     const updated = await Jobseeker.findByIdAndUpdate(
       id,
       {
@@ -362,8 +448,8 @@ exports.updateJobseeker = async (req, res) => {
         phone: normalizedPhone,
         gender,
         qualification,
-        industryType: industryType || null,
-        jobCategory: jobCategory || null,
+        industryType: (resolvedIndustryId && resolvedIndustryId !== '__other__') ? resolvedIndustryId : (industryType !== undefined ? null : jobseeker.industryType),
+        jobCategory: (resolvedCategoryId && resolvedCategoryId !== '__other__') ? resolvedCategoryId : (jobCategory !== undefined ? null : jobseeker.jobCategory),
         jobType: jobType || null,
         experience,
         currentSalary,
