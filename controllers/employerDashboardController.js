@@ -1107,8 +1107,7 @@ exports.getEmployerCandidates = async (req, res) => {
 
     const allQualifications = [...new Set([
       ...dbQualifications.map(q => q.name).filter(Boolean),
-      ...candidates.map(item => item.qualification?.name).filter(Boolean),
-      'B.Pharm', 'M.Pharm', 'B.Sc.', 'M.Sc.', 'B.Tech', 'M.Tech', 'MBA', 'B.Com', 'Diploma', 'Ph.D', '12th Pass'
+      ...candidates.map(item => item.qualification?.name).filter(Boolean)
     ])];
 
     const standardIndustries = [
